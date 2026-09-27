@@ -45,7 +45,7 @@ Five runtime pieces, all started by `docker compose up`:
 | `api` | FastAPI. All business logic, validation, auth, persistence. |
 | `worker` | Same Python codebase, different entrypoint. Sends queued emails with retries. |
 | `db` | PostgreSQL. Leads, users, email outbox. |
-| `minio` | S3-compatible object storage for resumes (real S3 in production, same code). |
+| `minio` | S3-compatible object storage for resumes (real S3 in production, same code). Pulled from quay.io, since MinIO no longer publishes to Docker Hub; those builds are frozen, which is acceptable for local development only. |
 
 ### Why this shape
 

@@ -16,7 +16,9 @@ services:
       retries: 20
 
   minio:
-    image: minio/minio:latest
+    # MinIO removed its images from Docker Hub in Sept 2026; quay.io still serves the same
+    # (now frozen) builds. Fine for local dev; production uses a managed S3 bucket.
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID}
