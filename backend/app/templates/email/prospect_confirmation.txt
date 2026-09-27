@@ -1,0 +1,5 @@
+Thanks, {{ lead.first_name }}.
+
+We've received your information and resume. An attorney on our team will review it and reach out to you at {{ lead.email }}.
+
+There's nothing else you need to do for now.
