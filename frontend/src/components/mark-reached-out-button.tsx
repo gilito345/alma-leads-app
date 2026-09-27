@@ -11,11 +11,11 @@ export function MarkReachedOutButton({ leadId }: { leadId: string }) {
   );
 
   return (
-    <form action={formAction}>
+    <form action={formAction} className="w-full sm:w-auto">
       <button
         type="submit"
         disabled={pending}
-        className="rounded-lg bg-accent px-4 py-2.5 text-sm font-medium text-white transition hover:bg-accent-hover disabled:opacity-60"
+        className="w-full rounded-lg bg-accent px-4 py-2.5 text-sm whitespace-nowrap sm:w-auto font-medium text-white transition hover:bg-accent-hover disabled:opacity-60"
       >
         {pending ? "Saving…" : "Mark as reached out"}
       </button>

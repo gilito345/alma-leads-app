@@ -6,17 +6,17 @@ export const metadata: Metadata = { title: "Get in touch" };
 
 export default function ApplyPage() {
   return (
-    <main className="mx-auto grid min-h-screen max-w-6xl gap-12 px-6 py-12 md:grid-cols-[1fr_1.1fr] md:items-center md:py-20">
-      <section className="max-w-md">
+    <main className="mx-auto grid min-h-screen max-w-xl gap-8 px-4 py-8 sm:px-6 sm:py-12 lg:max-w-6xl lg:grid-cols-[1fr_1.1fr] lg:items-center lg:gap-12 lg:py-20">
+      <section className="lg:max-w-md">
         <p className="text-sm font-medium tracking-wide text-accent uppercase">Free consultation</p>
-        <h1 className="mt-3 font-serif text-4xl leading-tight text-ink md:text-5xl">
+        <h1 className="mt-3 font-serif text-3xl leading-tight text-ink sm:text-4xl lg:text-5xl">
           Tell us about yourself.
         </h1>
-        <p className="mt-5 text-lg leading-relaxed text-ink-soft">
+        <p className="mt-4 text-base leading-relaxed text-ink-soft sm:mt-5 sm:text-lg">
           Share your details and resume. An attorney will review your background and reach out
           to talk through your options.
         </p>
-        <ul className="mt-8 space-y-3 text-ink-soft">
+        <ul className="mt-6 space-y-3 text-ink-soft sm:mt-8">
           <li className="flex gap-3">
             <Check /> Takes about two minutes
           </li>
@@ -29,7 +29,7 @@ export default function ApplyPage() {
         </ul>
       </section>
 
-      <section className="rounded-2xl border border-line bg-surface p-6 shadow-sm md:p-10">
+      <section className="rounded-2xl border border-line bg-surface p-5 shadow-sm sm:p-8 lg:p-10">
         <LeadForm />
       </section>
     </main>

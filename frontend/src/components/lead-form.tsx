@@ -182,7 +182,7 @@ function FileField(props: {
       >
         {props.file ? (
           <>
-            <span className="font-medium text-ink">{props.file.name}</span>
+            <span className="font-medium break-all text-ink">{props.file.name}</span>
             <span className="mt-1 text-sm text-muted">
               {formatBytes(props.file.size)} · Click to choose a different file
             </span>

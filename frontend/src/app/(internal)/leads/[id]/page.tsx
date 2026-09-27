@@ -27,9 +27,9 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
         ← All leads
       </Link>
 
-      <div className="mt-4 flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="font-serif text-3xl">
+      <div className="mt-4 flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="font-serif text-2xl break-words sm:text-3xl">
             {lead.first_name} {lead.last_name}
           </h1>
           <p className="mt-1 text-sm text-muted">
@@ -39,22 +39,22 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
         <StateBadge state={lead.state} />
       </div>
 
-      <dl className="mt-8 divide-y divide-line rounded-xl border border-line bg-surface">
+      <dl className="mt-6 divide-y divide-line rounded-xl border border-line bg-surface sm:mt-8">
         <Row label="First name">{lead.first_name}</Row>
         <Row label="Last name">{lead.last_name}</Row>
         <Row label="Email">
-          <a href={`mailto:${lead.email}`} className="text-accent hover:underline">
+          <a href={`mailto:${lead.email}`} className="break-all text-accent hover:underline">
             {lead.email}
           </a>
         </Row>
         <Row label="Resume">
           <a
             href={`/api/leads/${lead.id}/resume`}
-            className="inline-flex items-center gap-2 text-accent hover:underline"
+            className="break-all text-accent hover:underline"
           >
             {lead.resume.filename}
           </a>
-          <span className="ml-2 text-muted">{formatBytes(lead.resume.size_bytes)}</span>
+          <span className="ml-2 whitespace-nowrap text-muted">{formatBytes(lead.resume.size_bytes)}</span>
         </Row>
         <Row label="State">
           <StateBadge state={lead.state} />
@@ -68,7 +68,7 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
       </dl>
 
       {lead.state === "PENDING" && (
-        <div className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-line bg-surface px-6 py-5">
+        <div className="mt-6 flex flex-col gap-4 rounded-xl border border-line bg-surface px-4 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <p className="text-sm text-ink-soft">
             Contacted this prospect? Mark the lead so the team knows it&apos;s handled.
           </p>
@@ -81,9 +81,9 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="grid gap-1 px-6 py-4 sm:grid-cols-[10rem_1fr] sm:gap-4">
+    <div className="grid gap-1 px-4 py-3.5 sm:grid-cols-[10rem_1fr] sm:gap-4 sm:px-6 sm:py-4">
       <dt className="text-sm text-muted">{label}</dt>
-      <dd className="text-sm text-ink">{children}</dd>
+      <dd className="min-w-0 text-sm break-words text-ink">{children}</dd>
     </div>
   );
 }

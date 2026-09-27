@@ -31,13 +31,13 @@ export default async function LeadsPage({
     <div>
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="font-serif text-3xl">Leads</h1>
+          <h1 className="font-serif text-2xl sm:text-3xl">Leads</h1>
           <p className="mt-1 text-sm text-muted">
             {data.total} {data.total === 1 ? "lead" : "leads"}
             {state ? ` · ${FILTERS.find((f) => f.state === state)?.label.toLowerCase()}` : ""}
           </p>
         </div>
-        <nav aria-label="Filter by state" className="flex rounded-lg border border-line bg-surface p-1 text-sm">
+        <nav aria-label="Filter by state" className="flex w-full rounded-lg border border-line bg-surface p-1 text-sm sm:w-auto">
           {FILTERS.map((filter) => {
             const active = filter.state === state;
             return (
@@ -45,7 +45,7 @@ export default async function LeadsPage({
                 key={filter.label}
                 href={filter.state ? `/leads?state=${filter.state}` : "/leads"}
                 aria-current={active ? "page" : undefined}
-                className={`rounded-md px-3 py-1.5 transition ${
+                className={`flex-1 rounded-md px-3 py-1.5 text-center whitespace-nowrap transition sm:flex-none ${
                   active ? "bg-ink text-white" : "text-ink-soft hover:bg-paper"
                 }`}
               >
@@ -58,11 +58,33 @@ export default async function LeadsPage({
 
       <div className="mt-6 overflow-hidden rounded-xl border border-line bg-surface">
         {data.items.length === 0 ? (
-          <p className="px-6 py-16 text-center text-muted">
+          <p className="px-4 py-12 text-center text-muted sm:px-6 sm:py-16">
             {state ? "No leads in this state." : "No leads yet. They'll appear here as prospects submit the form."}
           </p>
         ) : (
-          <div className="overflow-x-auto">
+          <>
+          {/* Phones: one card per lead. */}
+          <ul className="divide-y divide-line md:hidden">
+            {data.items.map((lead) => (
+              <li key={lead.id}>
+                <Link href={`/leads/${lead.id}`} className="block px-4 py-4 active:bg-paper/60">
+                  <div className="flex items-start justify-between gap-3">
+                    <span className="min-w-0 font-medium break-words text-ink">
+                      {lead.first_name} {lead.last_name}
+                    </span>
+                    <StateBadge state={lead.state} />
+                  </div>
+                  <p className="mt-1 text-sm break-all text-ink-soft">{lead.email}</p>
+                  <p className="mt-1 text-xs text-muted">
+                    <LocalTime iso={lead.created_at} />
+                  </p>
+                </Link>
+              </li>
+            ))}
+          </ul>
+
+          {/* Tablets and up: a table. */}
+          <div className="hidden overflow-x-auto md:block">
             <table className="w-full text-left text-sm">
               <thead className="border-b border-line bg-paper/60 text-xs tracking-wide text-muted uppercase">
                 <tr>
@@ -75,12 +97,14 @@ export default async function LeadsPage({
               <tbody className="divide-y divide-line">
                 {data.items.map((lead) => (
                   <tr key={lead.id} className="group hover:bg-paper/60">
-                    <td className="px-6 py-4 font-medium">
+                    <td className="max-w-[16rem] px-6 py-4 font-medium break-words">
                       <Link href={`/leads/${lead.id}`} className="text-ink group-hover:text-accent">
                         {lead.first_name} {lead.last_name}
                       </Link>
                     </td>
-                    <td className="px-6 py-4 text-ink-soft">{lead.email}</td>
+                    <td className="max-w-[18rem] truncate px-6 py-4 text-ink-soft" title={lead.email}>
+                      {lead.email}
+                    </td>
                     <td className="px-6 py-4 whitespace-nowrap text-ink-soft">
                       <LocalTime iso={lead.created_at} />
                     </td>
@@ -92,6 +116,7 @@ export default async function LeadsPage({
               </tbody>
             </table>
           </div>
+          </>
         )}
       </div>
 
