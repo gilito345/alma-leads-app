@@ -41,7 +41,7 @@ Five runtime pieces, all started by `docker compose up`:
 
 | Service | Role |
 |---|---|
-| `web` | Next.js (App Router). Public form + internal dashboard. Acts as a backend-for-frontend: it holds the session cookie and calls the API server-side. |
+| `web` | Next.js (App Router). Public form + internal dashboard. Acts as a backend-for-frontend: the browser only talks to this origin; the Next.js server holds the session cookie and calls the API. |
 | `api` | FastAPI. All business logic, validation, auth, persistence. |
 | `worker` | Same Python codebase, different entrypoint. Sends queued emails with retries. |
 | `db` | PostgreSQL. Leads, users, email outbox. |
@@ -104,7 +104,7 @@ Schema changes go through **Alembic** migrations, which run automatically when t
 
 ## 5. API
 
-Base path `/api/v1`. OpenAPI docs at `/docs`.
+Base path `/api/v1` (health check at the root). OpenAPI docs at `/docs`.
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
@@ -174,7 +174,8 @@ Email bodies are Jinja2 templates (HTML + plain-text) in the API codebase.
 - Attorneys are rows in `users` with **argon2**-hashed passwords, created via `python -m app.cli create-user`.
 - `POST /auth/login` returns a short-lived signed **JWT** (HS256, 8h expiry).
 - The browser never holds the token in JavaScript. Next.js's login server action stores it in an **httpOnly, Secure, SameSite=Lax cookie**. Server components and route handlers read the cookie and call the API with `Authorization: Bearer`.
-- Next.js `middleware.ts` redirects unauthenticated requests on internal routes to `/login`. The API independently enforces auth on every internal endpoint; the middleware is UX, the API is the security boundary.
+- Next.js `proxy.ts` (Next 16's replacement for `middleware.ts`) redirects visitors without a session cookie away from internal routes to `/login`. The API independently checks the token on every internal endpoint; the proxy is UX, the API is the security boundary.
+- If the API rejects a token (expired, user deactivated), the page redirects to `/api/auth/logout`, which clears the cookie and returns the user to `/login`.
 - Resume downloads go through a Next.js route handler → API, so the file is only reachable with a valid session and storage is never exposed publicly.
 
 Trade-off: JWTs can't be revoked before expiry. For a small internal user base with an 8h expiry that's acceptable; a server-side session table is the upgrade path.
@@ -183,9 +184,10 @@ Trade-off: JWTs can't be revoked before expiry. For a small internal user base w
 
 The form is public, so it's the main abuse surface.
 
-- **File validation:** extension allow-list, content-type check, and magic-byte sniffing (a renamed `.exe` is rejected). Size is enforced while streaming, not after buffering the whole file.
+- **File validation:** extension allow-list plus magic-byte sniffing (a renamed `.exe` is rejected). The client's `Content-Type` is ignored; the stored type comes from our own allow-list.
+- **Size limits while streaming:** an ASGI middleware counts request-body bytes as they arrive and aborts with `413` once past the limit, so an oversized upload is cut off rather than buffered. The exact 10 MB per-file limit is then checked on the parsed file. The Next.js route handler applies the same cap in front.
 - **Stored under a generated key** (`leads/{lead_id}/{uuid}.{ext}`), never the user's filename, which is kept only as metadata and sanitized on download (`Content-Disposition`).
-- **Rate limiting** per IP on `POST /leads` (slowapi).
+- **Rate limiting** per client IP on `POST /leads` and `POST /auth/login` (slowapi). The web tier forwards the visitor's IP in `X-Forwarded-For`, and uvicorn only trusts that header from addresses in `FORWARDED_ALLOW_IPS`. Limits are held in memory, which is correct for one API instance; with several replicas they'd move to Redis.
 - **Honeypot field** in the form to drop naive bots without adding a CAPTCHA.
 - **CORS** limited to the web origin.
 - Input validation via Pydantic (email format, trimmed names, length limits).
@@ -197,12 +199,14 @@ Next.js App Router, TypeScript, Tailwind.
 | Route | Access | Content |
 |---|---|---|
 | `/` | Public | Redirects to `/apply`. |
-| `/apply` | Public | Lead form with client + server validation, file picker, success state. |
+| `/apply` | Public | Lead form with client + server validation, file picker, success state. Submits to the `/api/leads` route handler, which forwards to the API. |
 | `/login` | Public | Attorney login. |
 | `/leads` | Attorney | Table: name, email, submitted, state badge. Filter by state, paginated. |
 | `/leads/[id]` | Attorney | All fields, resume download, "Mark as reached out" button. |
 
-Mutations use **server actions** that call the API and revalidate the page, so the internal UI works without client-side data fetching libraries.
+Pages are server components that call the API directly, and mutations (login, logout, mark as reached out) are **server actions**, so the internal UI needs no client-side data-fetching library and never exposes the API token to browser JavaScript. Resume downloads go through the `/api/leads/[id]/resume` route handler, which streams the file from the API.
+
+Timestamps are rendered in the viewer's own time zone by a small client component, since the server doesn't know it.
 
 ## 10. Repository layout
 
@@ -237,16 +241,15 @@ alma-leads-app/
 └── frontend/
     ├── package.json
     ├── Dockerfile
-    ├── src/
-    │   ├── middleware.ts
-    │   ├── app/
-    │   │   ├── (public)/apply/
-    │   │   ├── login/
-    │   │   ├── (internal)/leads/ and leads/[id]/
-    │   │   └── api/leads/[id]/resume/route.ts
-    │   ├── components/
-    │   └── lib/              # API client, session helpers, types
-    └── tests/
+    └── src/
+        ├── proxy.ts          # redirects signed-out visitors away from /leads
+        ├── app/
+        │   ├── apply/        # public form
+        │   ├── login/        # sign-in page + server actions
+        │   ├── (internal)/   # auth-guarded layout, leads list and detail
+        │   └── api/          # route handlers: form submit, resume download, logout
+        ├── components/
+        └── lib/              # API client, session helpers, validation, types
 ```
 
 Layering in the API is `routes → services → repositories/adapters`. Routes handle HTTP only, services hold business rules (validation, state transitions, outbox writes), and repositories and adapters (storage, email) are swappable. That's what keeps email and storage replaceable and the services unit-testable with fakes.
@@ -254,7 +257,7 @@ Layering in the API is `routes → services → repositories/adapters`. Routes h
 ## 11. Testing and quality
 
 - **Backend:** pytest against a real Postgres (compose service in CI), with fake storage and email adapters. Covers lead creation (valid, bad file, too large), auth, list/filter, state transitions (including the rejected ones), and the worker's retry logic.
-- **Frontend:** type-check, lint, and component tests for the form validation.
+- **Frontend:** ESLint, unit tests (Vitest) for the form validation, and a production build, which type-checks the app.
 - **CI:** GitHub Actions runs ruff, mypy, pytest, `tsc`, ESLint, and the Next.js build on every push and PR.
 
 ## 12. Configuration
