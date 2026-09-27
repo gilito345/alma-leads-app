@@ -65,6 +65,29 @@ export function login(email: string, password: string) {
   });
 }
 
+export interface SignupStatus {
+  open: boolean;
+  invite_code_required: boolean;
+  enabled: boolean;
+}
+
+export function getSignupStatus() {
+  return request<SignupStatus>("/api/v1/auth/signup");
+}
+
+export function signup(body: {
+  email: string;
+  full_name: string;
+  password: string;
+  invite_code?: string;
+}) {
+  return request<{ access_token: string; expires_in: number }>("/api/v1/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
 export function getCurrentUser() {
   return authed<UserSummary>("/api/v1/auth/me");
 }

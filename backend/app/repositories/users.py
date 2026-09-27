@@ -18,5 +18,8 @@ class UserRepository:
             select(User).where(func.lower(User.email) == email.strip().lower())
         ).one_or_none()
 
+    def count(self) -> int:
+        return self.db.scalar(select(func.count()).select_from(User)) or 0
+
     def add(self, user: User) -> None:
         self.db.add(user)

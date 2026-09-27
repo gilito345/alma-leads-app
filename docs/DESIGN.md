@@ -17,7 +17,7 @@ These are gaps in the brief that I filled with a decision. Each is cheap to chan
 | Topic | Decision |
 |---|---|
 | Who gets the attorney email | A single configurable intake address (`ATTORNEY_NOTIFICATION_EMAIL`). Routing to a specific attorney or round-robin is a later feature. |
-| Who can log in | Attorneys only. No public sign-up; accounts are created with a CLI command. All attorneys see all leads. |
+| Who can log in | Attorneys only, and all attorneys see all leads. Accounts come from a guarded sign-up page (see §7) or a CLI command. |
 | State machine | `PENDING → REACHED_OUT` only. The reverse transition is rejected. Recording *who* marked it and *when* is kept for audit. |
 | Duplicate submissions | Allowed. The same email may apply more than once (e.g. with an updated CV); each submission is its own lead. |
 | Resume formats | PDF, DOC, DOCX, max 10 MB. |
@@ -115,6 +115,8 @@ Base path `/api/v1` (health check at the root). OpenAPI docs at `/docs`.
 | `PATCH` | `/leads/{id}` | Attorney | Update state. Body `{"state": "REACHED_OUT"}`. `409` if the transition is not allowed. |
 | `GET` | `/leads/{id}/resume` | Attorney | Stream the resume file. |
 | `POST` | `/auth/login` | Public | Email + password → access token. |
+| `GET` | `/auth/signup` | Public | Whether sign-up is open and needs an invite code. |
+| `POST` | `/auth/signup` | Public | Create an attorney account (rules in §7) and return an access token. |
 | `GET` | `/auth/me` | Attorney | Current user. |
 | `GET` | `/healthz` | Public | Liveness/readiness (checks DB). |
 
@@ -172,7 +174,14 @@ Email bodies are Jinja2 templates (HTML + plain-text) in the API codebase.
 
 ## 7. Authentication and authorization
 
-- Attorneys are rows in `users` with **argon2**-hashed passwords, created via `python -m app.cli create-user`.
+- Attorneys are rows in `users` with **argon2**-hashed passwords.
+- **Account creation is guarded**, because any account can read every lead's personal data and resume:
+  - The **first** account can be created at `/signup` with no code, so a fresh install is usable without a terminal.
+  - After that, `/signup` requires the team invite code (`ATTORNEY_SIGNUP_CODE`), compared in constant time. If no code is configured, sign-up is closed.
+  - A Postgres advisory lock serializes sign-ups, so two people can't both claim "first account" at the same moment.
+  - Sign-up is rate-limited like login, and signing up logs the new attorney straight in.
+  - `python -m app.cli create-user` remains for scripted setups.
+  - Upgrade path: per-person, single-use, expiring invites (or SSO), plus an admin role.
 - `POST /auth/login` returns a short-lived signed **JWT** (HS256, 8h expiry).
 - The browser never holds the token in JavaScript. Next.js's login server action stores it in an **httpOnly, Secure, SameSite=Lax cookie**. Server components and route handlers read the cookie and call the API with `Authorization: Bearer`.
 - Next.js `proxy.ts` (Next 16's replacement for `middleware.ts`) redirects visitors without a session cookie away from internal routes to `/login`. The API independently checks the token on every internal endpoint; the proxy is UX, the API is the security boundary.
@@ -202,6 +211,7 @@ Next.js App Router, TypeScript, Tailwind.
 | `/` | Public | Redirects to `/apply`. |
 | `/apply` | Public | Lead form with client + server validation, file picker, success state. Submits to the `/api/leads` route handler, which forwards to the API. |
 | `/login` | Public | Attorney login. |
+| `/signup` | Public | Create an attorney account: first account freely, later ones with the invite code. |
 | `/leads` | Attorney | Table: name, email, submitted, state badge. Filter by state, paginated. |
 | `/leads/[id]` | Attorney | All fields, resume download, "Mark as reached out" button. |
 

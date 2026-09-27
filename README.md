@@ -43,19 +43,22 @@ The reasoning behind the architecture is in [`docs/DESIGN.md`](docs/DESIGN.md).
 
    This starts Postgres, the API (which runs database migrations on startup), the email worker and the web app. The first build takes a few minutes.
 
-3. **Create an attorney account** (in a second terminal)
+3. **Create your attorney account**
+
+   Open http://localhost:3000/signup. The first account needs no invite code. After that, sign-up requires the `ATTORNEY_SIGNUP_CODE` from `.env`, or is closed if you leave it empty, so strangers can't create accounts and see leads.
+
+   You can also create accounts from the command line:
 
    ```bash
    docker compose exec api python -m app.cli create-user --email you@example.com --name "Your Name"
    ```
-
-   You'll be prompted for a password (at least 12 characters).
 
 4. **Try it**
 
    | URL | What |
    |---|---|
    | http://localhost:3000/apply | Public lead form |
+   | http://localhost:3000/signup | Create an attorney account |
    | http://localhost:3000/login | Attorney sign-in, then the dashboard at `/leads` |
    | http://localhost:8000/docs | Interactive API docs (OpenAPI) |
 
@@ -131,6 +134,7 @@ docker-compose.yml, .env.example
 | `PATCH` | `/api/v1/leads/{id}` (`{"state": "REACHED_OUT"}`) | Attorney |
 | `GET` | `/api/v1/leads/{id}/resume` | Attorney |
 | `POST` | `/api/v1/auth/login` | Public |
+| `GET` / `POST` | `/api/v1/auth/signup` | Public (first account, or with the invite code) |
 | `GET` | `/api/v1/auth/me` | Attorney |
 | `GET` | `/healthz` | Public |
 

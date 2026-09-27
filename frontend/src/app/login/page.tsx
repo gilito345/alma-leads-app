@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 
 import { LoginForm } from "@/components/login-form";
 
@@ -23,6 +24,12 @@ export default async function LoginPage({
         <div className="mt-6 rounded-2xl border border-line bg-surface p-6 shadow-sm">
           <LoginForm next={next ?? ""} />
         </div>
+        <p className="mt-6 text-center text-sm text-muted">
+          New here?{" "}
+          <Link href="/signup" className="text-accent hover:underline">
+            Create an account
+          </Link>
+        </p>
       </div>
     </main>
   );

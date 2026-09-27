@@ -42,6 +42,11 @@ class InvalidInputError(AppError):
     code = "validation_error"
 
 
+class ForbiddenError(AppError):
+    status_code = status.HTTP_403_FORBIDDEN
+    code = "forbidden"
+
+
 class AuthenticationError(AppError):
     status_code = status.HTTP_401_UNAUTHORIZED
     code = "not_authenticated"

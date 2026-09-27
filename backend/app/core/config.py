@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     jwt_secret: SecretStr = Field(min_length=32)
     jwt_algorithm: str = "HS256"
     jwt_expires_minutes: int = 480
+    # Required to create attorney accounts once at least one exists. Unset = sign-up closed.
+    attorney_signup_code: SecretStr | None = None
 
     # Email
     resend_api_key: SecretStr | None = None
@@ -54,7 +56,12 @@ class Settings(BaseSettings):
     rate_limit_login: str = "10/minute"
 
     @field_validator(
-        "s3_endpoint_url", "s3_access_key_id", "s3_secret_access_key", "resend_api_key", mode="before"
+        "s3_endpoint_url",
+        "s3_access_key_id",
+        "s3_secret_access_key",
+        "resend_api_key",
+        "attorney_signup_code",
+        mode="before",
     )
     @classmethod
     def _empty_as_none(cls, value: object) -> object:
