@@ -2,8 +2,8 @@
 
     python -m app.cli create-user --email jane@firm.com --name "Jane Doe"
 
-The password is prompted for (or read from --password / the CREATE_USER_PASSWORD env var for
-scripted setups).
+Creates the Supabase Auth identity and the matching attorney record. The password is prompted
+for (or read from --password / the CREATE_USER_PASSWORD env var for scripted setups).
 """
 
 import argparse
@@ -12,9 +12,11 @@ import os
 import sys
 
 from app.core.config import get_settings
-from app.core.errors import ConflictError
+from app.core.errors import AppError
+from app.core.security import TokenVerifier
 from app.db.session import get_sessionmaker
 from app.services.auth import AuthService
+from app.services.supabase_auth import SupabaseAuthClient
 
 
 def create_user(args: argparse.Namespace) -> int:
@@ -25,11 +27,15 @@ def create_user(args: argparse.Namespace) -> int:
             print("Passwords don't match", file=sys.stderr)
             return 1
 
+    settings = get_settings()
     with get_sessionmaker()() as db:
+        auth = AuthService(
+            db, settings, SupabaseAuthClient.from_settings(settings), TokenVerifier(settings)
+        )
         try:
-            user = AuthService(db, get_settings()).create_user(args.email, args.name, password)
-        except (ValueError, ConflictError) as exc:
-            print(str(exc), file=sys.stderr)
+            user = auth.create_user(args.email, args.name, password)
+        except AppError as exc:
+            print(exc.message, file=sys.stderr)
             return 1
     print(f"Created user {user.email} ({user.id})")
     return 0

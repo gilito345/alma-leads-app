@@ -1,17 +1,16 @@
+import uuid
 from collections.abc import Iterator
-from datetime import UTC, datetime, timedelta
 
-import jwt
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.core.errors import ConflictError
+from app.core.errors import ConflictError, InvalidInputError
 from app.main import create_app
 from app.models import User
 from app.services.auth import AuthService
+from tests.fakes import FakeSupabaseAuth, make_access_token
 from tests.helpers import ATTORNEY_PASSWORD
 
 
@@ -19,18 +18,21 @@ def login(client: TestClient, email: str, password: str):
     return client.post("/api/v1/auth/login", json={"email": email, "password": password})
 
 
+def bearer(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
 class TestLogin:
-    def test_returns_bearer_token(self, client: TestClient, attorney: User, settings: Settings):
+    def test_returns_supabase_session(self, client: TestClient, attorney: User) -> None:
         response = login(client, "JANE@firm.test", ATTORNEY_PASSWORD)
 
-        assert response.status_code == 200
+        assert response.status_code == 200, response.text
         body = response.json()
         assert body["token_type"] == "bearer"
-        assert body["expires_in"] == settings.jwt_expires_minutes * 60
-        claims = jwt.decode(
-            body["access_token"], settings.jwt_secret.get_secret_value(), algorithms=["HS256"]
-        )
-        assert claims["sub"] == str(attorney.id)
+        assert body["refresh_token"]
+        assert body["expires_in"] == 3600
+        me = client.get("/api/v1/auth/me", headers=bearer(body["access_token"]))
+        assert me.json()["id"] == str(attorney.id)
 
     def test_wrong_password(self, client: TestClient, attorney: User) -> None:
         response = login(client, attorney.email, "wrong-password")
@@ -42,66 +44,103 @@ class TestLogin:
         assert response.status_code == 401
         assert response.json()["error"]["code"] == "invalid_credentials"
 
-    def test_inactive_user_cannot_log_in(
-        self, client: TestClient, attorney: User, db: Session
+    def test_supabase_user_who_is_not_an_attorney_is_refused(
+        self, client: TestClient, supabase_auth: FakeSupabaseAuth
+    ) -> None:
+        # Exists in Supabase Auth (e.g. created in Studio) but has no attorney record.
+        supabase_auth.admin_create_user("outsider@firm.test", "some-long-password", "Outsider")
+        response = login(client, "outsider@firm.test", "some-long-password")
+        assert response.status_code == 401
+        assert response.json()["error"]["code"] == "invalid_credentials"
+        assert len(supabase_auth.signed_out) == 1
+
+    def test_inactive_attorney_cannot_log_in(
+        self, client: TestClient, attorney: User, auth_service: AuthService
     ) -> None:
         attorney.is_active = False
-        db.merge(attorney)
-        db.commit()
+        auth_service.db.commit()
         assert login(client, attorney.email, ATTORNEY_PASSWORD).status_code == 401
 
 
-class TestMe:
-    def test_returns_current_user(
-        self, client: TestClient, auth_headers: dict[str, str], attorney: User
-    ) -> None:
-        response = client.get("/api/v1/auth/me", headers=auth_headers)
-        assert response.status_code == 200
-        assert response.json()["email"] == attorney.email
+class TestRefreshAndLogout:
+    def test_refresh_returns_a_new_session(self, client: TestClient, attorney: User) -> None:
+        first = login(client, attorney.email, ATTORNEY_PASSWORD).json()
 
-    def test_expired_token_is_rejected(
-        self, client: TestClient, attorney: User, settings: Settings
-    ) -> None:
-        past = datetime.now(UTC) - timedelta(hours=10)
-        token = jwt.encode(
-            {
-                "sub": str(attorney.id),
-                "iat": past,
-                "exp": past + timedelta(hours=1),
-                "type": "access",
-            },
-            settings.jwt_secret.get_secret_value(),
-            algorithm="HS256",
+        response = client.post(
+            "/api/v1/auth/refresh", json={"refresh_token": first["refresh_token"]}
         )
-        response = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+
+        assert response.status_code == 200
+        second = response.json()
+        assert second["refresh_token"] != first["refresh_token"]
+        assert client.get("/api/v1/auth/me", headers=bearer(second["access_token"])).is_success
+
+    def test_used_refresh_token_is_rejected(self, client: TestClient, attorney: User) -> None:
+        token = login(client, attorney.email, ATTORNEY_PASSWORD).json()["refresh_token"]
+        client.post("/api/v1/auth/refresh", json={"refresh_token": token})
+        response = client.post("/api/v1/auth/refresh", json={"refresh_token": token})
         assert response.status_code == 401
+        assert response.json()["error"]["code"] == "session_expired"
+
+    def test_logout_signs_out_of_supabase(
+        self, client: TestClient, auth_headers: dict[str, str], supabase_auth: FakeSupabaseAuth
+    ) -> None:
+        assert client.post("/api/v1/auth/logout", headers=auth_headers).status_code == 204
+        assert supabase_auth.signed_out == [auth_headers["Authorization"].removeprefix("Bearer ")]
+
+
+class TestTokens:
+    def test_me_requires_a_token(self, client: TestClient) -> None:
+        response = client.get("/api/v1/auth/me")
+        assert response.status_code == 401
+        assert response.json()["error"]["code"] == "not_authenticated"
+
+    def test_expired_token_is_rejected(self, client: TestClient, attorney: User) -> None:
+        token = make_access_token(attorney.id, expires_in=-60)
+        assert client.get("/api/v1/auth/me", headers=bearer(token)).status_code == 401
 
     def test_token_signed_with_other_key_is_rejected(
         self, client: TestClient, attorney: User
     ) -> None:
-        now = datetime.now(UTC)
-        token = jwt.encode(
-            {
-                "sub": str(attorney.id),
-                "iat": now,
-                "exp": now + timedelta(hours=1),
-                "type": "access",
-            },
-            "some-other-secret-that-is-also-long-enough",
-            algorithm="HS256",
-        )
-        response = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
-        assert response.status_code == 401
+        token = make_access_token(attorney.id, secret="some-other-secret-that-is-long-enough")
+        assert client.get("/api/v1/auth/me", headers=bearer(token)).status_code == 401
+
+    def test_token_for_wrong_audience_is_rejected(
+        self, client: TestClient, attorney: User
+    ) -> None:
+        token = make_access_token(attorney.id, audience="anon")
+        assert client.get("/api/v1/auth/me", headers=bearer(token)).status_code == 401
+
+    def test_valid_token_for_non_attorney_is_forbidden(self, client: TestClient) -> None:
+        token = make_access_token(uuid.uuid4())
+        response = client.get("/api/v1/auth/me", headers=bearer(token))
+        assert response.status_code == 403
+        assert response.json()["error"]["code"] == "not_an_attorney"
 
 
 class TestCreateUser:
-    def test_rejects_duplicate_email(self, db: Session, settings: Settings, attorney: User):
-        with pytest.raises(ConflictError):
-            AuthService(db, settings).create_user("Jane@Firm.test", "Other", "another-password-1")
+    def test_creates_supabase_identity_and_attorney(
+        self, auth_service: AuthService, supabase_auth: FakeSupabaseAuth
+    ) -> None:
+        user = auth_service.create_user("New@Firm.test", "  New Attorney ", "a-long-enough-pass")
+        assert user.email == "new@firm.test"
+        assert user.full_name == "New Attorney"
+        assert supabase_auth.users["new@firm.test"][0] == user.id
 
-    def test_rejects_short_password(self, db: Session, settings: Settings) -> None:
-        with pytest.raises(ValueError, match="12 characters"):
-            AuthService(db, settings).create_user("new@firm.test", "New", "short")
+    def test_rejects_duplicate_email(self, auth_service: AuthService, attorney: User) -> None:
+        with pytest.raises(ConflictError):
+            auth_service.create_user("Jane@Firm.test", "Other", "another-password-1")
+
+    def test_rejects_short_password(self, auth_service: AuthService) -> None:
+        with pytest.raises(InvalidInputError):
+            auth_service.create_user("new@firm.test", "New", "short")
+
+    def test_existing_supabase_identity_is_reported_as_taken(
+        self, auth_service: AuthService, supabase_auth: FakeSupabaseAuth
+    ) -> None:
+        supabase_auth.admin_create_user("taken@firm.test", "a-long-enough-pass", "Someone")
+        with pytest.raises(ConflictError):
+            auth_service.create_user("taken@firm.test", "New", "a-long-enough-pass")
 
 
 def signup(client: TestClient, **overrides: str):
@@ -115,9 +154,14 @@ def signup(client: TestClient, **overrides: str):
 
 
 @pytest.fixture
-def client_with_invite_code(settings: Settings, storage) -> Iterator[TestClient]:
+def client_with_invite_code(
+    settings: Settings, storage, supabase_auth, token_verifier
+) -> Iterator[TestClient]:
     configured = settings.model_copy(update={"attorney_signup_code": SecretStr("join-the-firm")})
-    with TestClient(create_app(configured, storage=storage)) as test_client:
+    app = create_app(
+        configured, storage=storage, supabase_auth=supabase_auth, token_verifier=token_verifier
+    )
+    with TestClient(app) as test_client:
         yield test_client
 
 
@@ -132,8 +176,7 @@ class TestSignup:
         response = signup(client)
 
         assert response.status_code == 201, response.text
-        token = response.json()["access_token"]
-        me = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+        me = client.get("/api/v1/auth/me", headers=bearer(response.json()["access_token"]))
         assert me.json()["email"] == "new@firm.test"
         assert me.json()["full_name"] == "New Attorney"
 

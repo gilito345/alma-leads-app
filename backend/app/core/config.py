@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import EmailStr, Field, SecretStr, field_validator
+from pydantic import EmailStr, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,8 +19,19 @@ class Settings(BaseSettings):
     # Database
     database_url: str
 
-    # Resume storage: "local" (files on disk, for development) or "s3" (production)
-    storage_backend: Literal["local", "s3"] = "local"
+    # Supabase (Auth + Storage). Locally these come from `supabase start` / `supabase status`.
+    # The URL is how *this service* reaches Supabase (host.docker.internal from Docker).
+    supabase_url: str = "http://127.0.0.1:54321"
+    supabase_publishable_key: SecretStr
+    supabase_secret_key: SecretStr
+    # Only needed to verify legacy HS256-signed tokens; ES256/RS256 tokens are verified
+    # against the project's JWKS endpoint.
+    supabase_jwt_secret: SecretStr | None = None
+    supabase_storage_bucket: str = "resumes"
+
+    # Resume storage: "supabase" (Supabase Storage), "s3" (any S3 bucket) or "local" (disk)
+    storage_backend: Literal["supabase", "s3", "local"] = "supabase"
+    storage_auto_create_bucket: bool = True
     local_storage_dir: str = "./storage/resumes"
 
     # S3 (used when storage_backend=s3)
@@ -29,12 +40,8 @@ class Settings(BaseSettings):
     s3_secret_access_key: SecretStr | None = None
     s3_bucket: str = "resumes"
     s3_region: str = "us-east-1"
-    s3_auto_create_bucket: bool = True
 
-    # Auth
-    jwt_secret: SecretStr = Field(min_length=32)
-    jwt_algorithm: str = "HS256"
-    jwt_expires_minutes: int = 480
+    # Attorney accounts
     # Required to create attorney accounts once at least one exists. Unset = sign-up closed.
     attorney_signup_code: SecretStr | None = None
 
@@ -61,12 +68,17 @@ class Settings(BaseSettings):
         "s3_secret_access_key",
         "resend_api_key",
         "attorney_signup_code",
+        "supabase_jwt_secret",
         mode="before",
     )
     @classmethod
     def _empty_as_none(cls, value: object) -> object:
         # `KEY=` in an env file means "not set", not "set to an empty string".
         return None if value == "" else value
+
+    @property
+    def supabase_api_url(self) -> str:
+        return self.supabase_url.rstrip("/")
 
     @property
     def max_request_body_bytes(self) -> int:

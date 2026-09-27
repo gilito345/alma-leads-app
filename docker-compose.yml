@@ -1,35 +1,25 @@
 name: leads
 
-services:
-  db:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
-    volumes:
-      - db-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
+# Supabase (Postgres, Auth, Storage) runs separately via `supabase start` from the repo root.
+# These containers reach it on the host through host.docker.internal.
 
+x-reach-host: &reach-host
+  extra_hosts:
+    # Built in on Docker Desktop (Windows/macOS); this line makes it work on Linux too.
+    - "host.docker.internal:host-gateway"
+
+services:
   api:
     build: ./backend
     env_file: .env
+    <<: *reach-host
     environment:
       # Trust X-Forwarded-For from the web container so rate limits apply per visitor.
       FORWARDED_ALLOW_IPS: "*"
-      # Resumes are kept on a Docker volume locally; set STORAGE_BACKEND=s3 for S3.
-      LOCAL_STORAGE_DIR: /data/resumes
-    volumes:
-      - resumes:/data/resumes
+    # Keeps retrying (e.g. migrations) until `supabase start` has the database up.
+    restart: on-failure
     ports:
       - "8000:8000" # OpenAPI docs at http://localhost:8000/docs
-    depends_on:
-      db:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
       interval: 5s
@@ -40,6 +30,7 @@ services:
   worker:
     build: ./backend
     env_file: .env
+    <<: *reach-host
     command: ["python", "-m", "app.worker"]
     restart: unless-stopped
     depends_on:
@@ -54,7 +45,3 @@ services:
     depends_on:
       api:
         condition: service_healthy
-
-volumes:
-  db-data:
-  resumes:

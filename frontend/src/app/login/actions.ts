@@ -2,8 +2,8 @@
 
 import { redirect } from "next/navigation";
 
-import { ApiError, login } from "@/lib/api";
-import { clearSessionToken, safeNextPath, setSessionToken } from "@/lib/session";
+import { ApiError, login, logout } from "@/lib/api";
+import { clearSession, getAccessToken, safeNextPath, setSession } from "@/lib/session";
 
 export interface LoginState {
   error: string | null;
@@ -20,11 +20,13 @@ export async function loginAction(_: LoginState, formData: FormData): Promise<Lo
   }
 
   try {
-    const { access_token, expires_in } = await login(email, password);
-    await setSessionToken(access_token, expires_in);
+    await setSession(await login(email, password));
   } catch (error) {
     if (error instanceof ApiError && (error.status === 401 || error.status === 422)) {
       return { error: "That email and password don't match.", email };
+    }
+    if (error instanceof ApiError && error.status === 502) {
+      return { error: "Sign-in is unavailable. Is Supabase running (supabase start)?", email };
     }
     if (error instanceof ApiError && error.status === 429) {
       return { error: "Too many attempts. Wait a minute and try again.", email };
@@ -37,6 +39,8 @@ export async function loginAction(_: LoginState, formData: FormData): Promise<Lo
 }
 
 export async function logoutAction(): Promise<void> {
-  await clearSessionToken();
+  const token = await getAccessToken();
+  if (token) await logout(token);
+  await clearSession();
   redirect("/login");
 }

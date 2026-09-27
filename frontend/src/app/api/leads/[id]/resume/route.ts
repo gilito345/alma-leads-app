@@ -1,14 +1,14 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { apiBaseUrl } from "@/lib/config";
-import { SESSION_COOKIE } from "@/lib/session";
+import { ACCESS_COOKIE } from "@/lib/session-cookies";
 
 /**
  * Streams a lead's resume from the API. The browser only ever talks to this origin with its
  * session cookie; the bearer token and the storage bucket stay server-side.
  */
 export async function GET(request: NextRequest, context: { params: Promise<{ id: string }> }) {
-  const token = request.cookies.get(SESSION_COOKIE)?.value;
+  const token = request.cookies.get(ACCESS_COOKIE)?.value;
   if (!token) {
     return NextResponse.json(
       { error: { code: "not_authenticated", message: "Not authenticated" } },

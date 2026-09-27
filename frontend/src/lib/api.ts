@@ -3,7 +3,8 @@ import "server-only";
 import { redirect } from "next/navigation";
 
 import { apiBaseUrl } from "./config";
-import { requireSessionToken } from "./session";
+import { requireAccessToken } from "./session";
+import type { SessionTokens } from "./session-cookies";
 import type { ApiErrorBody, Lead, LeadPage, LeadState, UserSummary } from "./types";
 
 export class ApiError extends Error {
@@ -46,11 +47,12 @@ async function request<T>(path: string, init: RequestInit & { token?: string } =
  * sends the user to sign in again (via a route handler, since pages can't clear cookies).
  */
 async function authed<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const token = await requireSessionToken();
+  const token = await requireAccessToken();
   try {
     return await request<T>(path, { ...init, token });
   } catch (error) {
-    if (error instanceof ApiError && error.status === 401) {
+    // 401: the session is no longer valid. 403: valid Supabase user, but not an attorney.
+    if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
       redirect("/api/auth/logout?reason=expired");
     }
     throw error;
@@ -58,11 +60,24 @@ async function authed<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export function login(email: string, password: string) {
-  return request<{ access_token: string; expires_in: number }>("/api/v1/auth/login", {
+  return request<SessionTokens>("/api/v1/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
   });
+}
+
+/** Revoke the Supabase session. Best effort: signing out locally must never fail. */
+export async function logout(accessToken: string): Promise<void> {
+  try {
+    await fetch(`${apiBaseUrl()}/api/v1/auth/logout`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}` },
+      cache: "no-store",
+    });
+  } catch (error) {
+    console.warn("Sign-out request failed", error);
+  }
 }
 
 export interface SignupStatus {
@@ -81,7 +96,7 @@ export function signup(body: {
   password: string;
   invite_code?: string;
 }) {
-  return request<{ access_token: string; expires_in: number }>("/api/v1/auth/signup", {
+  return request<SessionTokens>("/api/v1/auth/signup", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

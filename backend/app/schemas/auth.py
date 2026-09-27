@@ -9,9 +9,16 @@ class LoginRequest(BaseModel):
 
 
 class TokenResponse(BaseModel):
+    """A Supabase Auth session: short-lived access token plus a refresh token."""
+
     access_token: str
+    refresh_token: str
     token_type: Literal["bearer"] = "bearer"
     expires_in: int
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str = Field(min_length=1, max_length=4096)
 
 
 class SignupRequest(BaseModel):

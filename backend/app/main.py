@@ -1,3 +1,4 @@
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -13,11 +14,19 @@ from app.core.config import Settings, get_settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging
 from app.core.middleware import BodySizeLimitMiddleware
+from app.core.security import TokenVerifier
 from app.services.storage import ObjectStorage, build_storage
+from app.services.supabase_auth import SupabaseAuth, SupabaseAuthClient
+
+logger = logging.getLogger(__name__)
 
 
 def create_app(
-    settings: Settings | None = None, *, storage: ObjectStorage | None = None
+    settings: Settings | None = None,
+    *,
+    storage: ObjectStorage | None = None,
+    supabase_auth: SupabaseAuth | None = None,
+    token_verifier: TokenVerifier | None = None,
 ) -> FastAPI:
     """Build the API. Run with `uvicorn --factory app.main:create_app`."""
     settings = settings or get_settings()
@@ -25,8 +34,12 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        if settings.s3_auto_create_bucket:
-            await run_in_threadpool(app.state.storage.ensure_bucket)
+        if settings.storage_auto_create_bucket:
+            try:
+                await run_in_threadpool(app.state.storage.ensure_bucket)
+            except Exception:
+                # Don't take the whole API down; uploads will report the problem instead.
+                logger.exception("Could not verify or create the resume storage bucket")
         yield
 
     app = FastAPI(
@@ -37,6 +50,8 @@ def create_app(
     )
     app.state.settings = settings
     app.state.storage = storage or build_storage(settings)
+    app.state.supabase_auth = supabase_auth or SupabaseAuthClient.from_settings(settings)
+    app.state.token_verifier = token_verifier or TokenVerifier(settings)
 
     limiter.enabled = settings.rate_limit_enabled
     app.state.limiter = limiter

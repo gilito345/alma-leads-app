@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { SESSION_COOKIE } from "@/lib/session";
+import { ACCESS_COOKIE, REFRESH_COOKIE } from "@/lib/session-cookies";
 
 /**
  * Clears the session and sends the user to /login. Pages can't modify cookies, so when a
@@ -12,6 +12,7 @@ export function GET(request: NextRequest) {
     target.searchParams.set("reason", "expired");
   }
   const response = NextResponse.redirect(target);
-  response.cookies.delete(SESSION_COOKIE);
+  response.cookies.delete(ACCESS_COOKIE);
+  response.cookies.delete(REFRESH_COOKIE);
   return response;
 }

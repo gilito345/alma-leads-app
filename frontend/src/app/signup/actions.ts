@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 
 import { ApiError, signup } from "@/lib/api";
-import { setSessionToken } from "@/lib/session";
+import { setSession } from "@/lib/session";
 
 export type SignupField = "full_name" | "email" | "password" | "confirm_password" | "invite_code";
 
@@ -31,13 +31,13 @@ export async function signupAction(_: SignupState, formData: FormData): Promise<
   }
 
   try {
-    const { access_token, expires_in } = await signup({
+    const tokens = await signup({
       email,
       full_name: fullName,
       password,
       ...(inviteCode ? { invite_code: inviteCode } : {}),
     });
-    await setSessionToken(access_token, expires_in);
+    await setSession(tokens);
   } catch (error) {
     if (!(error instanceof ApiError)) {
       console.error("Sign-up failed", error);

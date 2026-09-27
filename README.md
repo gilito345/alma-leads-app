@@ -9,87 +9,110 @@ A public lead-intake form and an internal, auth-guarded dashboard for attorneys.
 
 | Layer | Tech |
 |---|---|
-| API | FastAPI, SQLAlchemy 2, Alembic, PostgreSQL |
-| File storage | Local Docker volume in development, S3 in production (same interface) |
+| API | FastAPI, SQLAlchemy 2, Alembic |
+| Database, auth, file storage | [Supabase](https://supabase.com): Postgres, Supabase Auth, Supabase Storage (run locally with the Supabase CLI) |
 | Email | Resend, sent by a background worker from a transactional outbox |
 | Web | Next.js 16 (App Router, TypeScript, Tailwind CSS 4) |
 
 The reasoning behind the architecture is in [`docs/DESIGN.md`](docs/DESIGN.md).
 
-## Running locally with Docker (recommended)
+## Running locally
 
-**Prerequisites:** [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Docker Engine with Compose v2) and Git.
+**Prerequisites**
 
-1. **Configure**
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/), running
+- Git
+- The [Supabase CLI](https://supabase.com/docs/guides/local-development/cli/getting-started):
+  - **Windows** (PowerShell), via [Scoop](https://scoop.sh):
+    ```powershell
+    Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser   # once, if Scoop isn't installed
+    Invoke-RestMethod -Uri https://get.scoop.sh | Invoke-Expression        # installs Scoop
+    scoop bucket add supabase https://github.com/supabase/scoop-bucket.git
+    scoop install supabase
+    ```
+  - **macOS / Linux:** `brew install supabase/tap/supabase`
+  - Or, with Node.js installed, prefix the commands below with `npx` (`npx supabase start`).
 
-   ```bash
-   git clone https://github.com/gilito345/alma-leads-app.git
-   cd alma-leads-app
-   cp .env.example .env
-   ```
+**1. Get the code and configure**
 
-   Edit `.env`:
+```bash
+git clone https://github.com/gilito345/alma-leads-app.git
+cd alma-leads-app
+cp .env.example .env        # PowerShell: copy .env.example .env
+```
 
-   - `RESEND_API_KEY`: your key from [resend.com](https://resend.com/api-keys). Leave it empty to run without sending real email; the worker then logs each email instead (`docker compose logs -f worker`).
-   - `ATTORNEY_NOTIFICATION_EMAIL`: the inbox that receives new-lead notifications.
+Edit `.env` and set:
 
-   > **Resend without a verified domain** can only deliver to the email address that owns the Resend account. To demo end to end, use that address both as `ATTORNEY_NOTIFICATION_EMAIL` and in the form. To email anyone, [verify a domain](https://resend.com/domains) and set `EMAIL_FROM` to an address on it.
+- `RESEND_API_KEY`: your key from [resend.com](https://resend.com/api-keys). Leave it empty to run without sending real email; the worker then logs each email instead (`docker compose logs -f worker`).
+- `ATTORNEY_NOTIFICATION_EMAIL`: the inbox that receives new-lead notifications.
 
-2. **Start everything**
+You'll fill in the two Supabase keys after the next step.
 
-   ```bash
-   docker compose up --build
-   ```
+> **Resend without a verified domain** can only deliver to the email address that owns the Resend account. To demo end to end, use that address both as `ATTORNEY_NOTIFICATION_EMAIL` and in the form. To email anyone, [verify a domain](https://resend.com/domains) and set `EMAIL_FROM` to an address on it.
 
-   This starts Postgres, the API (which runs database migrations on startup), the email worker and the web app. The first build takes a few minutes.
+**2. Start Supabase** (from the repo root)
 
-3. **Create your attorney account**
+```bash
+supabase start
+```
 
-   Open http://localhost:3000/signup. The first account needs no invite code. After that, sign-up requires the `ATTORNEY_SIGNUP_CODE` from `.env`, or is closed if you leave it empty, so strangers can't create accounts and see leads.
+The first run downloads the Supabase images and takes a few minutes. It starts Postgres, Auth, Storage and Studio using [`supabase/config.toml`](supabase/config.toml), which also creates the private `resumes` bucket and turns off public self-sign-up.
 
-   You can also create accounts from the command line:
+When it finishes, it prints an **Authentication Keys** table. Copy the **Publishable** key into `SUPABASE_PUBLISHABLE_KEY` and the **Secret** key into `SUPABASE_SECRET_KEY` in `.env`. (`supabase status` prints them again any time.) The database URL and Supabase URL in `.env.example` already match the local stack.
 
-   ```bash
-   docker compose exec api python -m app.cli create-user --email you@example.com --name "Your Name"
-   ```
+**3. Start the app**
 
-4. **Try it**
+```bash
+docker compose up --build
+```
 
-   | URL | What |
-   |---|---|
-   | http://localhost:3000/apply | Public lead form |
-   | http://localhost:3000/signup | Create an attorney account |
-   | http://localhost:3000/login | Attorney sign-in, then the dashboard at `/leads` |
-   | http://localhost:8000/docs | Interactive API docs (OpenAPI) |
+This builds and starts the API (which applies the database migrations on startup), the email worker and the web app.
 
-   Submit the form with a PDF, DOC or DOCX, then watch `docker compose logs -f worker` to see both emails go out. Sign in to see the lead and mark it as reached out.
+**4. Create your attorney account**
 
-To stop: `docker compose down` (add `-v` to also delete the database and uploaded resumes).
+Open http://localhost:3000/signup. The first account needs no invite code. After that, sign-up requires the `ATTORNEY_SIGNUP_CODE` from `.env`, or is closed if you leave it empty, so strangers can't create accounts and see leads.
 
-**Using S3 instead of local files:** set `STORAGE_BACKEND=s3` plus `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY` in `.env` (and `S3_ENDPOINT_URL` for S3-compatible services such as Cloudflare R2). The bucket is created on startup if it doesn't exist.
+You can also create accounts from the command line:
+
+```bash
+docker compose exec api python -m app.cli create-user --email you@example.com --name "Your Name"
+```
+
+**5. Try it**
+
+| URL | What |
+|---|---|
+| http://localhost:3000/apply | Public lead form |
+| http://localhost:3000/signup | Create an attorney account |
+| http://localhost:3000/login | Attorney sign-in, then the dashboard at `/leads` |
+| http://localhost:8000/docs | Interactive API docs (OpenAPI) |
+| http://localhost:54323 | Supabase Studio: browse tables, auth users and uploaded resumes |
+
+Submit the form with a PDF, DOC or DOCX, then watch `docker compose logs -f worker` to see both emails go out. Sign in to see the lead and mark it as reached out.
+
+**Stopping:** `docker compose down`, then `supabase stop`. Data is kept between runs; `supabase stop --no-backup` discards it.
+
+### Using a hosted Supabase project instead
+
+Create a project at [supabase.com](https://supabase.com), then in `.env` set `SUPABASE_URL` to the project URL, `SUPABASE_PUBLISHABLE_KEY` and `SUPABASE_SECRET_KEY` from *Project Settings → API Keys*, and `DATABASE_URL` to the connection string (with the `postgresql+psycopg://` scheme). Create a private bucket named `resumes`, and turn off new-user sign-ups in the project's Auth settings (accounts are created through the app's guarded `/signup` instead). Skip `supabase start`.
 
 ## Running without Docker (for development)
 
-You'll still need Postgres. The simplest is to run just that in Docker, after adding `ports: ["5432:5432"]` under `db` in `docker-compose.yml`:
-
-```bash
-docker compose up -d db
-```
-
-Resumes are written to `backend/storage/resumes` by default.
+With `supabase start` running:
 
 **API** (Python 3.12+, [uv](https://docs.astral.sh/uv/)):
 
 ```bash
 cd backend
 uv sync
-export DATABASE_URL=postgresql+psycopg://leads:leads@localhost:5432/leads
-export JWT_SECRET=local-dev-only-secret-change-me-before-deploying
+export DATABASE_URL=postgresql+psycopg://postgres:postgres@127.0.0.1:54322/postgres
+export SUPABASE_URL=http://127.0.0.1:54321
+export SUPABASE_PUBLISHABLE_KEY=...   # from `supabase status`
+export SUPABASE_SECRET_KEY=...        # from `supabase status`
 export ATTORNEY_NOTIFICATION_EMAIL=you@example.com RESEND_API_KEY=   # empty = log emails
 uv run alembic upgrade head
 uv run uvicorn --factory app.main:create_app --reload        # API on :8000
 uv run python -m app.worker                                  # in another terminal
-uv run python -m app.cli create-user --email you@example.com --name "You"
 ```
 
 **Web** (Node 20.9+):
@@ -103,9 +126,10 @@ API_INTERNAL_URL=http://localhost:8000 npm run dev            # web on :3000
 ## Tests and checks
 
 ```bash
-# Backend: needs a Postgres database it may wipe
+# Backend: needs a plain Postgres database it may wipe (not your Supabase one).
+# Supabase Auth and Storage are replaced by in-memory fakes.
 cd backend
-TEST_DATABASE_URL=postgresql+psycopg://leads:leads@localhost:5432/leads_test uv run pytest
+TEST_DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/leads_test uv run pytest
 uv run ruff check . && uv run ruff format --check . && uv run mypy app
 
 # Frontend
@@ -120,6 +144,7 @@ CI runs all of these on every push and pull request (`.github/workflows/ci.yml`)
 ```
 backend/     FastAPI app (app/), Alembic migrations, tests
 frontend/    Next.js app (src/app routes, src/components, src/lib)
+supabase/    Supabase CLI config for the local stack (config.toml)
 docs/        Design document
 docker-compose.yml, .env.example
 ```
@@ -133,7 +158,9 @@ docker-compose.yml, .env.example
 | `GET` | `/api/v1/leads/{id}` | Attorney |
 | `PATCH` | `/api/v1/leads/{id}` (`{"state": "REACHED_OUT"}`) | Attorney |
 | `GET` | `/api/v1/leads/{id}/resume` | Attorney |
-| `POST` | `/api/v1/auth/login` | Public |
+| `POST` | `/api/v1/auth/login` | Public; returns a Supabase session |
+| `POST` | `/api/v1/auth/refresh` | Public (with a refresh token) |
+| `POST` | `/api/v1/auth/logout` | Attorney |
 | `GET` / `POST` | `/api/v1/auth/signup` | Public (first account, or with the invite code) |
 | `GET` | `/api/v1/auth/me` | Attorney |
 | `GET` | `/healthz` | Public |

@@ -8,7 +8,7 @@ Prospects fill in a **public** form (first name, last name, email, resume/CV). O
 2. Emails the prospect (confirmation) and an attorney (new-lead notification).
 3. Exposes an **auth-guarded internal UI** where attorneys list leads, view details, download resumes, and move a lead from `PENDING` to `REACHED_OUT`.
 
-Constraints from the brief: FastAPI for the API, Next.js for the web app, persistent storage, a real email service, production-style repo structure.
+Constraints from the brief: FastAPI for the API, Next.js for the web app, persistent storage, a real email service, production-style repo structure. Platform choice: **Supabase** provides the database, authentication and file storage; **Resend** sends email.
 
 ## 2. Assumptions
 
@@ -30,28 +30,37 @@ flowchart LR
     P[Prospect browser] -->|/apply| WEB[Next.js web]
     A[Attorney browser] -->|/login, /leads| WEB
     WEB -->|REST /api/v1| API[FastAPI API]
-    API --> DB[(PostgreSQL)]
-    API --> S3[(Resume storage<br/>local volume / S3)]
-    API -->|insert outbox rows| DB
+    subgraph SB[Supabase]
+        DB[(Postgres)]
+        AUTH[Auth]
+        STORE[(Storage<br/>private bucket)]
+    end
+    API -->|SQL| DB
+    API -->|sign-in, refresh,<br/>admin create user| AUTH
+    API -.->|verify tokens via JWKS| AUTH
+    API -->|resumes| STORE
     WORKER[Email worker] -->|poll outbox| DB
     WORKER -->|HTTPS| RESEND[Resend]
 ```
 
-Four services plus a volume, all started by `docker compose up`:
-
-| Service | Role |
+| Piece | Role |
 |---|---|
-| `web` | Next.js (App Router). Public form + internal dashboard. Acts as a backend-for-frontend: the browser only talks to this origin; the Next.js server holds the session cookie and calls the API. |
-| `api` | FastAPI. All business logic, validation, auth, persistence. |
-| `worker` | Same Python codebase, different entrypoint. Sends queued emails with retries. |
-| `db` | PostgreSQL. Leads, users, email outbox. |
-| `resumes` volume | Resume files in development. Production points the same storage interface at S3. |
+| `web` (Docker) | Next.js (App Router). Public form + internal dashboard. Acts as a backend-for-frontend: the browser only talks to this origin; the Next.js server holds the session cookies and calls the API. |
+| `api` (Docker) | FastAPI. All business logic, validation and authorization; the only thing that talks to Supabase. |
+| `worker` (Docker) | Same Python codebase, different entrypoint. Sends queued emails with retries. |
+| Supabase Postgres | Leads, attorney records, email outbox. Schema owned by Alembic migrations. |
+| Supabase Auth | Attorney identities, passwords and sessions (access + refresh tokens). |
+| Supabase Storage | Resume files, in the private `resumes` bucket. |
+
+Locally, Supabase runs through the Supabase CLI (`supabase start`, configured by `supabase/config.toml`), and the app's containers reach it via `host.docker.internal`. Against a hosted Supabase project only `.env` changes.
 
 ### Why this shape
 
 - **FastAPI owns the domain; Next.js owns presentation.** No business rules or DB access in the web tier. The API is usable on its own (and documented at `/docs`), which is what "create, get, update leads" APIs imply.
-- **Files outside the database, behind a storage interface.** Postgres stores only metadata and the object key. Resumes can be large and are write-once/read-rarely, which is what object storage is for. `ObjectStorage` has two implementations: `S3ObjectStorage` for production (AWS S3 or any S3-compatible service) and `LocalFileStorage`, which writes to a Docker volume so the project runs with no cloud account. `STORAGE_BACKEND` picks one; nothing else changes.
-  - *Why not MinIO locally?* It was the original plan, but MinIO has stopped publishing its community images (removed from Docker Hub in September 2026, and the quay.io copies aren't reliably pullable). Depending on it would make `docker compose up` fragile, so local development uses plain files instead.
+- **Supabase is infrastructure, not the API.** Supabase ships an auto-generated REST API over the database, but the brief asks for FastAPI APIs, and lead data shouldn't be one misconfigured policy away from the public. So only the backend talks to Supabase, with the secret key; the Data API is locked out of our tables (§7), and the browser never talks to Supabase directly.
+- **Why Supabase:** one managed platform gives Postgres, a production-grade auth server (password hashing, refresh-token rotation, rate limits, admin API) and object storage, instead of hand-rolling auth and running a separate S3 service. The local CLI stack mirrors the hosted product, so moving to a hosted project is a config change.
+- **Files outside the database, behind a storage interface.** Postgres stores only metadata and the object key. `ObjectStorage` has implementations for Supabase Storage (default), any S3 bucket, and local files, chosen by `STORAGE_BACKEND`.
+  - *Why not MinIO locally?* It was the original plan, but MinIO stopped publishing community images (removed from Docker Hub in September 2026). Supabase Storage covers the same need.
 - **Email via a transactional outbox, not inline.** See §6.
 
 ## 4. Data model
@@ -62,10 +71,9 @@ erDiagram
     LEADS ||--o{ EMAIL_OUTBOX : "triggers"
 
     USERS {
-        uuid id PK
+        uuid id PK "= Supabase Auth user id"
         string email UK
         string full_name
-        string hashed_password
         bool is_active
         timestamptz created_at
     }
@@ -101,7 +109,9 @@ erDiagram
 
 Indexes: `leads(state, created_at desc)` for the dashboard's default view, `leads(email)` for lookup, `email_outbox(status, next_attempt_at)` for the worker's poll.
 
-Schema changes go through **Alembic** migrations, which run automatically when the API container starts.
+`users` holds only attorneys: Supabase Auth owns the identity and password, and a row here is what grants dashboard access. Resume files live in Supabase Storage; `resume_object_key` points at them.
+
+Schema changes go through **Alembic** migrations, which run automatically when the API container starts. (Supabase's own `supabase/migrations` isn't used, so the same migrations run against plain Postgres in CI.)
 
 ## 5. API
 
@@ -114,9 +124,11 @@ Base path `/api/v1` (health check at the root). OpenAPI docs at `/docs`.
 | `GET` | `/leads/{id}` | Attorney | Lead detail. |
 | `PATCH` | `/leads/{id}` | Attorney | Update state. Body `{"state": "REACHED_OUT"}`. `409` if the transition is not allowed. |
 | `GET` | `/leads/{id}/resume` | Attorney | Stream the resume file. |
-| `POST` | `/auth/login` | Public | Email + password → access token. |
+| `POST` | `/auth/login` | Public | Email + password → Supabase session (access + refresh token). Attorneys only. |
+| `POST` | `/auth/refresh` | Public | Refresh token → new session (Supabase rotates the refresh token). |
+| `POST` | `/auth/logout` | Attorney | Revoke the Supabase session. |
 | `GET` | `/auth/signup` | Public | Whether sign-up is open and needs an invite code. |
-| `POST` | `/auth/signup` | Public | Create an attorney account (rules in §7) and return an access token. |
+| `POST` | `/auth/signup` | Public | Create an attorney account (rules in §7) and return a session. |
 | `GET` | `/auth/me` | Attorney | Current user. |
 | `GET` | `/healthz` | Public | Liveness/readiness (checks DB). |
 
@@ -174,21 +186,32 @@ Email bodies are Jinja2 templates (HTML + plain-text) in the API codebase.
 
 ## 7. Authentication and authorization
 
-- Attorneys are rows in `users` with **argon2**-hashed passwords.
-- **Account creation is guarded**, because any account can read every lead's personal data and resume:
-  - The **first** account can be created at `/signup` with no code, so a fresh install is usable without a terminal.
-  - After that, `/signup` requires the team invite code (`ATTORNEY_SIGNUP_CODE`), compared in constant time. If no code is configured, sign-up is closed.
-  - A Postgres advisory lock serializes sign-ups, so two people can't both claim "first account" at the same moment.
-  - Sign-up is rate-limited like login, and signing up logs the new attorney straight in.
-  - `python -m app.cli create-user` remains for scripted setups.
-  - Upgrade path: per-person, single-use, expiring invites (or SSO), plus an admin role.
-- `POST /auth/login` returns a short-lived signed **JWT** (HS256, 8h expiry).
-- The browser never holds the token in JavaScript. Next.js's login server action stores it in an **httpOnly, Secure, SameSite=Lax cookie**. Server components and route handlers read the cookie and call the API with `Authorization: Bearer`.
-- Next.js `proxy.ts` (Next 16's replacement for `middleware.ts`) redirects visitors without a session cookie away from internal routes to `/login`. The API independently checks the token on every internal endpoint; the proxy is UX, the API is the security boundary.
-- If the API rejects a token (expired, user deactivated), the page redirects to `/api/auth/logout`, which clears the cookie and returns the user to `/login`.
-- Resume downloads go through a Next.js route handler → API, so the file is only reachable with a valid session and storage is never exposed publicly.
+**Identity: Supabase Auth.** Passwords, hashing, sessions and refresh-token rotation are Supabase's job. The backend calls it over HTTP:
 
-Trade-off: JWTs can't be revoked before expiry. For a small internal user base with an 8h expiry that's acceptable; a server-side session table is the upgrade path.
+- `POST /auth/login` → Supabase password sign-in → the backend checks the user has an active row in `users`. A Supabase identity that isn't an attorney gets the same "invalid email or password" as a wrong password, and its session is revoked.
+- `POST /auth/refresh` → Supabase refresh-token grant, with the same attorney check.
+- Accounts are created with Supabase's **admin API** (secret key), then the `users` row is inserted. If that insert fails, the Supabase identity is deleted again, so the two never drift apart.
+
+**Authorization: every API request.** `get_current_user` verifies the bearer token's signature against Supabase's **JWKS** (`/auth/v1/.well-known/jwks.json`, ES256; HS256 is accepted only if a legacy secret is configured), checks `exp` and `aud=authenticated`, then requires an active attorney row for `sub`. Signed-in but not an attorney → `403`.
+
+**Account creation is guarded**, because any account can read every lead's personal data and resume:
+
+- Public self-sign-up is **off in Supabase** (`enable_signup = false`), so nobody can create an identity by calling Supabase directly. Only the backend can, through the admin API.
+- The **first** attorney can sign up at `/signup` with no code, so a fresh install is usable without a terminal. After that, `/signup` needs the team invite code (`ATTORNEY_SIGNUP_CODE`, compared in constant time), or is closed if none is configured.
+- A Postgres advisory lock serializes sign-ups, so two people can't both claim "first account" at once. Sign-up and login are rate-limited.
+- `python -m app.cli create-user` remains for scripted setups.
+- Upgrade path: per-person, single-use, expiring invites (Supabase's invite emails fit here), plus an admin role.
+
+**Keeping Supabase's Data API away from lead data.** Supabase exposes tables in `public` over REST/GraphQL to anyone with the publishable key, subject to row level security. Migration `0002` enables RLS on every table with no policies and revokes the `anon`/`authenticated` grants, and `config.toml` sets `auto_expose_new_tables = false`. The backend connects as the table owner, which RLS doesn't restrict. The resumes bucket is private, and only the backend's secret key can read it.
+
+**Sessions in the browser.**
+
+- The browser never holds a token in JavaScript. Login and sign-up server actions store the access and refresh tokens in **httpOnly, SameSite=Lax cookies** (Secure over HTTPS).
+- Next.js `proxy.ts` runs before every internal page, server action and resume download. If the access token is missing or within a minute of expiring, it exchanges the refresh token through the API and hands the new cookies to both the current request and the browser. If that fails, it clears the cookies and redirects to `/login`.
+- Signing out revokes the Supabase session and clears the cookies.
+- The proxy is session plumbing; the API's token check is the security boundary.
+
+Trade-off: an access token stays valid until it expires (1 hour by default) even after sign-out or deactivation. The attorney-row check on every request closes the deactivation case immediately; shortening `jwt_expiry` tightens the rest.
 
 ## 8. Public endpoint hardening
 
@@ -212,7 +235,7 @@ Next.js App Router, TypeScript, Tailwind.
 | `/apply` | Public | Lead form with client + server validation, file picker, success state. Submits to the `/api/leads` route handler, which forwards to the API. |
 | `/login` | Public | Attorney login. |
 | `/signup` | Public | Create an attorney account: first account freely, later ones with the invite code. |
-| `/leads` | Attorney | Table: name, email, submitted, state badge. Filter by state, paginated. |
+| `/leads` | Attorney | Cards on phones, a table from tablet width: name, email, submitted, state. Filter by state, paginated. |
 | `/leads/[id]` | Attorney | All fields, resume download, "Mark as reached out" button. |
 
 Pages are server components that call the API directly, and mutations (login, logout, mark as reached out) are **server actions**, so the internal UI needs no client-side data-fetching library and never exposes the API token to browser JavaScript. Resume downloads go through the `/api/leads/[id]/resume` route handler, which streams the file from the API.
@@ -225,7 +248,8 @@ Timestamps are rendered in the viewer's own time zone by a small client componen
 alma-leads-app/
 ├── README.md                 # how to run locally
 ├── docs/DESIGN.md            # this document
-├── docker-compose.yml        # db, api, worker, web
+├── docker-compose.yml        # api, worker, web (Supabase runs via its CLI)
+├── supabase/config.toml      # local Supabase stack: auth settings, resumes bucket
 ├── .env.example
 ├── .github/workflows/ci.yml  # lint, type-check, test (backend + frontend)
 ├── backend/
@@ -241,9 +265,9 @@ alma-leads-app/
 │   │   ├── models/           # SQLAlchemy models
 │   │   ├── schemas/          # Pydantic request/response models
 │   │   ├── repositories/     # DB queries, no business rules
-│   │   ├── services/         # lead service, auth service
+│   │   ├── services/         # lead service, auth service, Supabase Auth client
 │   │   │   ├── email/        # EmailSender interface, Resend + console, templates
-│   │   │   └── storage/      # ObjectStorage interface: S3 and local-file implementations
+│   │   │   └── storage/      # ObjectStorage: Supabase Storage, S3, local files
 │   │   ├── api/
 │   │   │   ├── deps.py       # current_user, db session, services
 │   │   │   └── v1/           # auth.py, leads.py, health.py
@@ -253,7 +277,7 @@ alma-leads-app/
     ├── package.json
     ├── Dockerfile
     └── src/
-        ├── proxy.ts          # redirects signed-out visitors away from /leads
+        ├── proxy.ts          # refreshes sessions; redirects signed-out visitors to /login
         ├── app/
         │   ├── apply/        # public form
         │   ├── login/        # sign-in page + server actions
@@ -267,8 +291,8 @@ Layering in the API is `routes → services → repositories/adapters`. Routes h
 
 ## 11. Testing and quality
 
-- **Backend:** pytest against a real Postgres (compose service in CI), with fake storage and email adapters. Covers lead creation (valid, bad file, too large), auth, list/filter, state transitions (including the rejected ones), and the worker's retry logic.
-- **Frontend:** ESLint, unit tests (Vitest) for the form validation, and a production build, which type-checks the app.
+- **Backend:** pytest against a real Postgres (a service container in CI). Supabase Auth is replaced by an in-memory fake that issues real signed tokens, so the verification path is exercised; the Supabase Auth and Storage HTTP clients are tested against mocked responses, and ES256/JWKS verification with a generated key. Also covers lead creation (valid, bad file, too large), sign-up rules, list/filter, state transitions (including the rejected ones), and the worker's retry logic.
+- **Frontend:** ESLint, unit tests (Vitest) for form validation and token-expiry handling, and a production build, which type-checks the app.
 - **CI:** GitHub Actions runs ruff, mypy, pytest, `tsc`, ESLint, and the Next.js build on every push and PR.
 
 ## 12. Configuration
@@ -281,6 +305,6 @@ All config comes from environment variables (12-factor), validated at startup by
 - Virus scanning of uploads (e.g. ClamAV on upload, or S3 + scanning Lambda).
 - Presigned download URLs instead of proxying, once files or traffic are large.
 - Search across leads, CSV export.
-- Revocable sessions, SSO for staff, audit log.
+- SSO for staff (Supabase Auth supports it), audit log.
 - Observability: structured logs are in; metrics/tracing (OpenTelemetry) would be next.
-- Deployment config (e.g. container platform + managed Postgres + S3).
+- Deployment config (e.g. container platform for web/api/worker + a hosted Supabase project).

@@ -16,11 +16,15 @@ os.environ.update(
     {
         "ENVIRONMENT": "test",
         "DATABASE_URL": os.environ["TEST_DATABASE_URL"],
-        "JWT_SECRET": "test-secret-that-is-long-enough-for-hs256",
+        "SUPABASE_URL": "http://supabase.test",
+        "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_test",
+        "SUPABASE_SECRET_KEY": "sb_secret_test",
+        "SUPABASE_JWT_SECRET": "test-supabase-jwt-secret-long-enough-for-hs256",
         "ATTORNEY_NOTIFICATION_EMAIL": "intake@firm.test",
         "WEB_ORIGIN": "http://web.test",
         "RATE_LIMIT_ENABLED": "false",
-        "S3_AUTO_CREATE_BUCKET": "false",
+        "STORAGE_AUTO_CREATE_BUCKET": "false",
+        "STORAGE_BACKEND": "local",
         "RESEND_API_KEY": "",
     }
 )
@@ -34,11 +38,13 @@ from sqlalchemy import text  # noqa: E402
 from sqlalchemy.orm import Session  # noqa: E402
 
 from app.core.config import Settings, get_settings  # noqa: E402
+from app.core.security import TokenVerifier  # noqa: E402
 from app.db.session import get_engine, get_sessionmaker  # noqa: E402
 from app.main import create_app  # noqa: E402
 from app.models import User  # noqa: E402
 from app.services.auth import AuthService  # noqa: E402
 from app.services.storage import InMemoryObjectStorage  # noqa: E402
+from tests.fakes import FakeSupabaseAuth, NoJwks  # noqa: E402
 from tests.helpers import ATTORNEY_PASSWORD  # noqa: E402
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -78,8 +84,35 @@ def storage() -> InMemoryObjectStorage:
 
 
 @pytest.fixture
-def app(settings: Settings, storage: InMemoryObjectStorage) -> FastAPI:
-    return create_app(settings, storage=storage)
+def supabase_auth() -> FakeSupabaseAuth:
+    return FakeSupabaseAuth()
+
+
+@pytest.fixture
+def token_verifier(settings: Settings) -> TokenVerifier:
+    return TokenVerifier(settings, jwks=NoJwks())
+
+
+@pytest.fixture
+def auth_service(
+    db: Session,
+    settings: Settings,
+    supabase_auth: FakeSupabaseAuth,
+    token_verifier: TokenVerifier,
+) -> AuthService:
+    return AuthService(db, settings, supabase_auth, token_verifier)
+
+
+@pytest.fixture
+def app(
+    settings: Settings,
+    storage: InMemoryObjectStorage,
+    supabase_auth: FakeSupabaseAuth,
+    token_verifier: TokenVerifier,
+) -> FastAPI:
+    return create_app(
+        settings, storage=storage, supabase_auth=supabase_auth, token_verifier=token_verifier
+    )
 
 
 @pytest.fixture
@@ -89,10 +122,8 @@ def client(app: FastAPI) -> Iterator[TestClient]:
 
 
 @pytest.fixture
-def attorney(db: Session, settings: Settings) -> User:
-    return AuthService(db, settings).create_user(
-        "jane@firm.test", "Jane Attorney", ATTORNEY_PASSWORD
-    )
+def attorney(auth_service: AuthService) -> User:
+    return auth_service.create_user("jane@firm.test", "Jane Attorney", ATTORNEY_PASSWORD)
 
 
 @pytest.fixture
