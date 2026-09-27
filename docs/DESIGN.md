@@ -31,13 +31,13 @@ flowchart LR
     A[Attorney browser] -->|/login, /leads| WEB
     WEB -->|REST /api/v1| API[FastAPI API]
     API --> DB[(PostgreSQL)]
-    API --> S3[(Object storage<br/>MinIO / S3)]
+    API --> S3[(Resume storage<br/>local volume / S3)]
     API -->|insert outbox rows| DB
     WORKER[Email worker] -->|poll outbox| DB
     WORKER -->|HTTPS| RESEND[Resend]
 ```
 
-Five runtime pieces, all started by `docker compose up`:
+Four services plus a volume, all started by `docker compose up`:
 
 | Service | Role |
 |---|---|
@@ -45,12 +45,13 @@ Five runtime pieces, all started by `docker compose up`:
 | `api` | FastAPI. All business logic, validation, auth, persistence. |
 | `worker` | Same Python codebase, different entrypoint. Sends queued emails with retries. |
 | `db` | PostgreSQL. Leads, users, email outbox. |
-| `minio` | S3-compatible object storage for resumes (real S3 in production, same code). Pulled from quay.io, since MinIO no longer publishes to Docker Hub; those builds are frozen, which is acceptable for local development only. |
+| `resumes` volume | Resume files in development. Production points the same storage interface at S3. |
 
 ### Why this shape
 
 - **FastAPI owns the domain; Next.js owns presentation.** No business rules or DB access in the web tier. The API is usable on its own (and documented at `/docs`), which is what "create, get, update leads" APIs imply.
-- **Files in object storage, not the database.** Postgres stores only metadata and the object key. Resumes can be large and are write-once/read-rarely, which is exactly what S3 is for. MinIO locally means no cloud account is needed to run the project, and the S3 client code is identical in production.
+- **Files outside the database, behind a storage interface.** Postgres stores only metadata and the object key. Resumes can be large and are write-once/read-rarely, which is what object storage is for. `ObjectStorage` has two implementations: `S3ObjectStorage` for production (AWS S3 or any S3-compatible service) and `LocalFileStorage`, which writes to a Docker volume so the project runs with no cloud account. `STORAGE_BACKEND` picks one; nothing else changes.
+  - *Why not MinIO locally?* It was the original plan, but MinIO has stopped publishing its community images (removed from Docker Hub in September 2026, and the quay.io copies aren't reliably pullable). Depending on it would make `docker compose up` fragile, so local development uses plain files instead.
 - **Email via a transactional outbox, not inline.** See §6.
 
 ## 4. Data model
@@ -214,7 +215,7 @@ Timestamps are rendered in the viewer's own time zone by a small client componen
 alma-leads-app/
 ├── README.md                 # how to run locally
 ├── docs/DESIGN.md            # this document
-├── docker-compose.yml        # db, minio, api, worker, web
+├── docker-compose.yml        # db, api, worker, web
 ├── .env.example
 ├── .github/workflows/ci.yml  # lint, type-check, test (backend + frontend)
 ├── backend/
@@ -232,7 +233,7 @@ alma-leads-app/
 │   │   ├── repositories/     # DB queries, no business rules
 │   │   ├── services/         # lead service, auth service
 │   │   │   ├── email/        # EmailSender interface, Resend + console, templates
-│   │   │   └── storage/      # ObjectStorage interface, S3 implementation
+│   │   │   └── storage/      # ObjectStorage interface: S3 and local-file implementations
 │   │   ├── api/
 │   │   │   ├── deps.py       # current_user, db session, services
 │   │   │   └── v1/           # auth.py, leads.py, health.py

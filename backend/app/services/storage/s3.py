@@ -18,7 +18,7 @@ _CHUNK_SIZE = 64 * 1024
 
 
 class S3ObjectStorage:
-    """S3-compatible storage. Points at MinIO locally and at AWS S3 in production."""
+    """S3 or any S3-compatible service (R2, MinIO, ...). Used in production."""
 
     def __init__(self, client: "S3Client", bucket: str, region: str) -> None:
         self._client = client
@@ -34,7 +34,7 @@ class S3ObjectStorage:
             aws_access_key_id=settings.s3_access_key_id,
             aws_secret_access_key=secret.get_secret_value() if secret else None,
             region_name=settings.s3_region,
-            # Path-style addressing is required by MinIO and harmless on S3.
+            # Path-style addressing works with S3-compatible services and with AWS.
             config=Config(s3={"addressing_style": "path"}, retries={"max_attempts": 3}),
         )
         return cls(client, settings.s3_bucket, settings.s3_region)

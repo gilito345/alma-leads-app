@@ -15,36 +15,20 @@ services:
       timeout: 3s
       retries: 20
 
-  minio:
-    # MinIO removed its images from Docker Hub in Sept 2026; quay.io still serves the same
-    # (now frozen) builds. Fine for local dev; production uses a managed S3 bucket.
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID}
-      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY}
-    ports:
-      - "9001:9001" # web console, to browse uploaded resumes
-    volumes:
-      - minio-data:/data
-    healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-
   api:
     build: ./backend
     env_file: .env
     environment:
       # Trust X-Forwarded-For from the web container so rate limits apply per visitor.
       FORWARDED_ALLOW_IPS: "*"
+      # Resumes are kept on a Docker volume locally; set STORAGE_BACKEND=s3 for S3.
+      LOCAL_STORAGE_DIR: /data/resumes
+    volumes:
+      - resumes:/data/resumes
     ports:
       - "8000:8000" # OpenAPI docs at http://localhost:8000/docs
     depends_on:
       db:
-        condition: service_healthy
-      minio:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
@@ -73,4 +57,4 @@ services:
 
 volumes:
   db-data:
-  minio-data:
+  resumes:

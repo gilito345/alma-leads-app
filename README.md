@@ -10,7 +10,7 @@ A public lead-intake form and an internal, auth-guarded dashboard for attorneys.
 | Layer | Tech |
 |---|---|
 | API | FastAPI, SQLAlchemy 2, Alembic, PostgreSQL |
-| File storage | S3-compatible (MinIO locally, S3 in production) |
+| File storage | Local Docker volume in development, S3 in production (same interface) |
 | Email | Resend, sent by a background worker from a transactional outbox |
 | Web | Next.js 16 (App Router, TypeScript, Tailwind CSS 4) |
 
@@ -41,7 +41,7 @@ The reasoning behind the architecture is in [`docs/DESIGN.md`](docs/DESIGN.md).
    docker compose up --build
    ```
 
-   This starts Postgres, MinIO, the API (which runs database migrations on startup), the email worker and the web app. The first build takes a few minutes.
+   This starts Postgres, the API (which runs database migrations on startup), the email worker and the web app. The first build takes a few minutes.
 
 3. **Create an attorney account** (in a second terminal)
 
@@ -58,21 +58,22 @@ The reasoning behind the architecture is in [`docs/DESIGN.md`](docs/DESIGN.md).
    | http://localhost:3000/apply | Public lead form |
    | http://localhost:3000/login | Attorney sign-in, then the dashboard at `/leads` |
    | http://localhost:8000/docs | Interactive API docs (OpenAPI) |
-   | http://localhost:9001 | MinIO console for uploaded resumes (`minioadmin` / `minioadmin`) |
 
    Submit the form with a PDF, DOC or DOCX, then watch `docker compose logs -f worker` to see both emails go out. Sign in to see the lead and mark it as reached out.
 
-To stop: `docker compose down` (add `-v` to also delete the database and uploaded files).
+To stop: `docker compose down` (add `-v` to also delete the database and uploaded resumes).
+
+**Using S3 instead of local files:** set `STORAGE_BACKEND=s3` plus `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY` in `.env` (and `S3_ENDPOINT_URL` for S3-compatible services such as Cloudflare R2). The bucket is created on startup if it doesn't exist.
 
 ## Running without Docker (for development)
 
-You'll still need Postgres and an S3-compatible store; the simplest is to run just those in Docker:
+You'll still need Postgres. The simplest is to run just that in Docker, after adding `ports: ["5432:5432"]` under `db` in `docker-compose.yml`:
 
 ```bash
-docker compose up -d db minio
+docker compose up -d db
 ```
 
-Then expose them to your machine by adding `ports: ["5432:5432"]` under `db` and `"9000:9000"` under `minio` in `docker-compose.yml`, or point the settings below at your own instances.
+Resumes are written to `backend/storage/resumes` by default.
 
 **API** (Python 3.12+, [uv](https://docs.astral.sh/uv/)):
 
@@ -80,7 +81,6 @@ Then expose them to your machine by adding `ports: ["5432:5432"]` under `db` and
 cd backend
 uv sync
 export DATABASE_URL=postgresql+psycopg://leads:leads@localhost:5432/leads
-export S3_ENDPOINT_URL=http://localhost:9000 S3_ACCESS_KEY_ID=minioadmin S3_SECRET_ACCESS_KEY=minioadmin
 export JWT_SECRET=local-dev-only-secret-change-me-before-deploying
 export ATTORNEY_NOTIFICATION_EMAIL=you@example.com RESEND_API_KEY=   # empty = log emails
 uv run alembic upgrade head

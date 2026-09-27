@@ -7,7 +7,7 @@ class ObjectNotFoundError(Exception):
 
 
 class ObjectStorage(Protocol):
-    """Where resume files live. Implementations: S3 (also MinIO), and in-memory for tests."""
+    """Where resume files live. Implementations: S3, local files, and in-memory for tests."""
 
     def ensure_bucket(self) -> None: ...
 

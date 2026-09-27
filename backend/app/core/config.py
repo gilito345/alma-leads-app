@@ -19,7 +19,11 @@ class Settings(BaseSettings):
     # Database
     database_url: str
 
-    # Object storage (S3 / MinIO)
+    # Resume storage: "local" (files on disk, for development) or "s3" (production)
+    storage_backend: Literal["local", "s3"] = "local"
+    local_storage_dir: str = "./storage/resumes"
+
+    # S3 (used when storage_backend=s3)
     s3_endpoint_url: str | None = None
     s3_access_key_id: str | None = None
     s3_secret_access_key: SecretStr | None = None
@@ -49,7 +53,9 @@ class Settings(BaseSettings):
     rate_limit_create_lead: str = "5/minute"
     rate_limit_login: str = "10/minute"
 
-    @field_validator("s3_endpoint_url", "s3_access_key_id", "resend_api_key", mode="before")
+    @field_validator(
+        "s3_endpoint_url", "s3_access_key_id", "s3_secret_access_key", "resend_api_key", mode="before"
+    )
     @classmethod
     def _empty_as_none(cls, value: object) -> object:
         # `KEY=` in an env file means "not set", not "set to an empty string".

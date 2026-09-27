@@ -13,7 +13,7 @@ from app.core.config import Settings, get_settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging
 from app.core.middleware import BodySizeLimitMiddleware
-from app.services.storage import ObjectStorage, S3ObjectStorage
+from app.services.storage import ObjectStorage, build_storage
 
 
 def create_app(
@@ -36,7 +36,7 @@ def create_app(
         lifespan=lifespan,
     )
     app.state.settings = settings
-    app.state.storage = storage or S3ObjectStorage.from_settings(settings)
+    app.state.storage = storage or build_storage(settings)
 
     limiter.enabled = settings.rate_limit_enabled
     app.state.limiter = limiter

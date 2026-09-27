@@ -17,7 +17,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-dev --no-install-project
 
 FROM base AS runtime
-RUN useradd --create-home --uid 10001 app
+RUN useradd --create-home --uid 10001 app \
+    && mkdir -p /data/resumes && chown -R app:app /data
 COPY --from=deps /opt/venv /opt/venv
 COPY --chown=app:app . .
 USER app
