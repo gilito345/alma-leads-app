@@ -76,6 +76,13 @@ class Settings(BaseSettings):
         # `KEY=` in an env file means "not set", not "set to an empty string".
         return None if value == "" else value
 
+    @field_validator("supabase_publishable_key", "supabase_secret_key", mode="before")
+    @classmethod
+    def _required_key(cls, value: object) -> object:
+        if value is None or (isinstance(value, str) and not value.strip()):
+            raise ValueError("is empty; copy it from `supabase status` into .env")
+        return value
+
     @property
     def supabase_api_url(self) -> str:
         return self.supabase_url.rstrip("/")
