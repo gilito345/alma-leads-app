@@ -96,20 +96,27 @@ export default async function LeadsPage({
               </thead>
               <tbody className="divide-y divide-line">
                 {data.items.map((lead) => (
-                  <tr key={lead.id} className="group transition hover:bg-apple-soft">
-                    <td className="max-w-[16rem] px-6 py-4 font-medium break-words">
-                      <Link href={`/leads/${lead.id}`} className="text-ink group-hover:text-accent">
+                  <tr key={lead.id} className="group cursor-pointer transition hover:bg-apple-soft">
+                    <td className="relative max-w-[16rem] px-6 py-4 font-medium break-words">
+                      {/* The row's one real link; its ::after stretches over this cell. */}
+                      <Link
+                        href={`/leads/${lead.id}`}
+                        className="text-ink group-hover:text-accent after:absolute after:inset-0 after:content-['']"
+                      >
                         {lead.first_name} {lead.last_name}
                       </Link>
                     </td>
-                    <td className="max-w-[18rem] truncate px-6 py-4 text-ink-soft" title={lead.email}>
+                    <td className="relative max-w-[18rem] truncate px-6 py-4 text-ink-soft" title={lead.email}>
                       {lead.email}
+                      <RowLink leadId={lead.id} />
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-ink-soft">
+                    <td className="relative px-6 py-4 whitespace-nowrap text-ink-soft">
                       <LocalTime iso={lead.created_at} />
+                      <RowLink leadId={lead.id} />
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="relative px-6 py-4">
                       <StateBadge state={lead.state} />
+                      <RowLink leadId={lead.id} />
                     </td>
                   </tr>
                 ))}
@@ -135,6 +142,15 @@ export default async function LeadsPage({
       )}
     </div>
   );
+}
+
+/**
+ * Covers a table cell so a click anywhere on the row opens the lead (and cmd/middle-click
+ * opens it in a new tab). Hidden from keyboard and screen readers: the name cell holds the
+ * row's one real link, so each lead is announced and tabbed to once.
+ */
+function RowLink({ leadId }: { leadId: string }) {
+  return <Link href={`/leads/${leadId}`} tabIndex={-1} aria-hidden="true" className="absolute inset-0" />;
 }
 
 function PageLink(props: {
