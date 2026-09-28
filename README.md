@@ -158,7 +158,8 @@ docker-compose.yml, .env.example
 | `GET` | `/api/v1/leads?state=&page=&page_size=` | Attorney |
 | `GET` | `/api/v1/leads/{id}` | Attorney |
 | `PATCH` | `/api/v1/leads/{id}` (`{"state": "REACHED_OUT"}`) | Attorney |
-| `GET` | `/api/v1/leads/{id}/resume` | Attorney |
+| `GET` | `/api/v1/leads/{id}/resume?disposition=` | Attorney (`inline` displays PDFs; other types always download) |
+| `GET` | `/api/v1/leads/{id}/resume/preview` | Attorney |
 | `POST` | `/api/v1/auth/login` | Public; returns a Supabase session |
 | `POST` | `/api/v1/auth/refresh` | Public (with a refresh token) |
 | `POST` | `/api/v1/auth/logout` | Attorney |

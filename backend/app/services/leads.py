@@ -17,7 +17,8 @@ from app.models import (
     User,
 )
 from app.repositories.leads import LeadRepository
-from app.schemas.lead import LeadCreate
+from app.schemas.lead import LeadCreate, ResumePreview
+from app.services.resume_preview import docx_to_html, preview_format
 from app.services.resumes import validate_resume
 from app.services.storage import ObjectNotFoundError, ObjectStorage
 
@@ -128,6 +129,18 @@ class LeadService:
                 "Resume object missing for lead=%s key=%s", lead.id, lead.resume_object_key
             )
             raise NotFoundError("Resume file not found") from exc
+
+    def resume_preview(self, lead_id: uuid.UUID) -> ResumePreview:
+        lead = self.get_lead(lead_id)
+        fmt = preview_format(lead.resume_content_type)
+        if fmt != "html":
+            return ResumePreview(format=fmt)
+        _, chunks = self.open_resume(lead_id)
+        # Bounded by the upload limit, which every stored resume passed.
+        html = docx_to_html(b"".join(chunks))
+        if html is None:
+            return ResumePreview(format="unavailable")
+        return ResumePreview(format="html", html=html)
 
     def _delete_object_quietly(self, key: str) -> None:
         try:

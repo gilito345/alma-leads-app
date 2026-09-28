@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints
 
@@ -36,6 +36,17 @@ class ResumeInfo(BaseModel):
     filename: str
     content_type: str
     size_bytes: int
+
+
+class ResumePreview(BaseModel):
+    """How the dashboard can show a resume in the page.
+
+    `pdf`: embed the file itself (`/resume?disposition=inline`). `html`: render `html`, already
+    sanitized, in a sandboxed frame. `unavailable`: offer the download only.
+    """
+
+    format: Literal["pdf", "html", "unavailable"]
+    html: str | None = None
 
 
 class LeadRead(BaseModel):

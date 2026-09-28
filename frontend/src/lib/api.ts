@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { apiBaseUrl } from "./config";
 import { requireAccessToken } from "./session";
 import type { SessionTokens } from "./session-cookies";
-import type { ApiErrorBody, Lead, LeadPage, LeadState, UserSummary } from "./types";
+import type { ApiErrorBody, Lead, LeadPage, LeadState, ResumePreview, UserSummary } from "./types";
 
 export class ApiError extends Error {
   constructor(
@@ -131,6 +131,10 @@ export function listLeads(params: { state?: LeadState; page?: number; pageSize?:
 
 export function getLead(id: string) {
   return authed<Lead>(`/api/v1/leads/${encodeURIComponent(id)}`);
+}
+
+export function getResumePreview(id: string) {
+  return authed<ResumePreview>(`/api/v1/leads/${encodeURIComponent(id)}/resume/preview`);
 }
 
 export function updateLeadState(id: string, state: LeadState) {

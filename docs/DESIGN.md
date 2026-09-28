@@ -125,7 +125,8 @@ Base path `/api/v1` (health check at the root). OpenAPI docs at `/docs`.
 | `GET` | `/leads` | Attorney | List leads. Query: `state`, `page`, `page_size`. Newest first. |
 | `GET` | `/leads/{id}` | Attorney | Lead detail. |
 | `PATCH` | `/leads/{id}` | Attorney | Update state. Body `{"state": "REACHED_OUT"}`. `409` if the transition is not allowed. |
-| `GET` | `/leads/{id}/resume` | Attorney | Stream the resume file. |
+| `GET` | `/leads/{id}/resume` | Attorney | Stream the resume file. `?disposition=inline` lets a PDF display in the browser; DOC/DOCX always download. |
+| `GET` | `/leads/{id}/resume/preview` | Attorney | How to show the resume in the page: `pdf` (embed the file), `html` (a DOCX converted and sanitized), or `unavailable` (DOC). |
 | `POST` | `/auth/login` | Public | Email + password → Supabase session (access + refresh token). Attorneys only. |
 | `POST` | `/auth/refresh` | Public | Refresh token → new session (Supabase rotates the refresh token). |
 | `POST` | `/auth/logout` | Attorney | Revoke the Supabase session. |
@@ -248,9 +249,15 @@ Next.js App Router, TypeScript, Tailwind.
 | `/accept-invite` | Public (token link) | Choose a password to finish an invite, then land signed in. |
 | `/invite` | Attorney | Invite a colleague by name and email. |
 | `/leads` | Attorney | Cards on phones, a table from tablet width: name, email, submitted, state. Filter by state, paginated. |
-| `/leads/[id]` | Attorney | All fields, resume download, "Mark as reached out" button. |
+| `/leads/[id]` | Attorney | Contact bar ("Email {name}" with a prefilled subject, "Copy email", "Mark as reached out"), all fields, and the resume shown in the page with a download button. |
 
 Pages are server components that call the API directly, and mutations (login, logout, mark as reached out) are **server actions**, so the internal UI needs no client-side data-fetching library and never exposes the API token to browser JavaScript. Resume downloads go through the `/api/leads/[id]/resume` route handler, which streams the file from the API.
+
+**Viewing resumes in the page.** Uploaded files come from strangers, so the preview is deliberately narrow:
+
+- **PDF:** embedded from `/api/leads/[id]/resume?disposition=inline` and shown by the browser's own PDF viewer. Only PDFs are ever served `inline`, always with their allow-listed content type and `nosniff`. That one route may be framed by our own pages (`X-Frame-Options: SAMEORIGIN`, `frame-ancestors 'self'`); everything else stays `DENY`. Phones get an "Open" button instead, since mobile browsers render embedded PDFs poorly.
+- **DOCX:** converted server-side with mammoth, embedded images skipped, and the output passed through an nh3 allow-list (text formatting, lists, tables, and `http`/`https`/`mailto` links only). Archives that would expand past 50 MB are refused before anything is decompressed. The HTML is rendered in an iframe with an empty `sandbox`, so even a sanitizer gap couldn't run script or reach the app.
+- **DOC:** legacy binary Word needs LibreOffice to read, which would add hundreds of MB to the image and a heavyweight parser to the attack surface. These show a download button only; converting them is a possible next step.
 
 Timestamps are rendered in the viewer's own time zone by a small client component, since the server doesn't know it.
 

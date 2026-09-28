@@ -1,7 +1,7 @@
 import logging
 import uuid
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile, status
@@ -12,7 +12,14 @@ from pydantic import ValidationError
 from app.api.deps import get_current_user, get_lead_service
 from app.api.rate_limit import create_lead_limit, limiter
 from app.models import LeadState, User
-from app.schemas.lead import LeadCreate, LeadCreated, LeadPage, LeadRead, LeadUpdate
+from app.schemas.lead import (
+    LeadCreate,
+    LeadCreated,
+    LeadPage,
+    LeadRead,
+    LeadUpdate,
+    ResumePreview,
+)
 from app.services.leads import LeadService
 
 logger = logging.getLogger(__name__)
@@ -86,18 +93,25 @@ def update_lead(
     return LeadRead.from_model(service.update_state(lead_id, body.state, user))
 
 
-@router.get("/{lead_id}/resume", summary="Download a lead's resume")
+@router.get("/{lead_id}/resume", summary="Download (or, for PDFs, view) a lead's resume")
 def download_resume(
     lead_id: uuid.UUID,
     service: LeadService = Depends(get_lead_service),
     _: User = Depends(get_current_user),
+    disposition: Annotated[
+        Literal["attachment", "inline"],
+        Query(description="`inline` lets the browser display a PDF; other types always download"),
+    ] = "attachment",
 ) -> StreamingResponse:
     lead, chunks = service.open_resume(lead_id)
+    # Only PDFs may render in the browser. Word files are never displayed inline, so a
+    # browser can't be talked into interpreting an uploaded file as something else.
+    inline = disposition == "inline" and lead.resume_content_type == "application/pdf"
     return StreamingResponse(
         chunks,
         media_type=lead.resume_content_type,
         headers={
-            "Content-Disposition": content_disposition(lead.resume_filename),
+            "Content-Disposition": content_disposition(lead.resume_filename, inline=inline),
             "Content-Length": str(lead.resume_size_bytes),
             "X-Content-Type-Options": "nosniff",
             "Cache-Control": "private, no-store",
@@ -105,7 +119,21 @@ def download_resume(
     )
 
 
-def content_disposition(filename: str) -> str:
+@router.get(
+    "/{lead_id}/resume/preview",
+    response_model=ResumePreview,
+    summary="How to show a lead's resume in the page (PDF, sanitized HTML, or none)",
+)
+def preview_resume(
+    lead_id: uuid.UUID,
+    service: LeadService = Depends(get_lead_service),
+    _: User = Depends(get_current_user),
+) -> ResumePreview:
+    return service.resume_preview(lead_id)
+
+
+def content_disposition(filename: str, *, inline: bool = False) -> str:
     ascii_name = filename.encode("ascii", "ignore").decode() or "resume"
     ascii_name = ascii_name.replace('"', "").replace("\\", "")
-    return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename)}"
+    kind = "inline" if inline else "attachment"
+    return f"{kind}; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename)}"

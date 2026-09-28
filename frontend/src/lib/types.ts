@@ -37,3 +37,9 @@ export interface ApiErrorBody {
     details?: { field: string; message: string }[] | null;
   };
 }
+
+/** How the dashboard can show a resume in the page. See the API's `/resume/preview`. */
+export interface ResumePreview {
+  format: "pdf" | "html" | "unavailable";
+  html: string | null;
+}
