@@ -66,10 +66,6 @@ It added 20+ tests and walked through both flows in the browser.
 
 The agent generated `uv.lock` and `package-lock.json` and ran the full CI suite against the pinned versions. That exposed the never-passing test suite, which it fixed.
 
-> how would we add MFA for attorneys? Don't implement it yet just discuss it with me
-
-The agent proposed authenticator-app MFA, enforced in the API by requiring the stronger `aal2` session level. It weighed recovery options and flagged that password reset must not bypass the second factor. Recorded as a next step in the design doc.
-
 > https://www.tryalma.com/ make sure you navigate around to various pages for a better sampling
 
 The agent sampled six pages at desktop and phone widths and read the site's own CSS variables. It wrote `docs/STYLE_GUIDE.md`, with Figtree standing in for Alma's licensed Gellix font, and restyled the app.
