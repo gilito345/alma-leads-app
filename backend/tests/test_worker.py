@@ -64,6 +64,8 @@ def test_sends_queued_emails_and_marks_them_sent(
     assert "Ada" in prospect.text
     assert attorney.subject == "New lead: Ada Lovelace"
     assert f"http://web.test/leads/{lead_id}" in attorney.html
+    # The resume is only reachable from the dashboard, so the email doesn't name the file.
+    assert "resume.pdf" not in attorney.html + attorney.text
     assert attorney.reply_to == "ada@example.com"
 
     # Nothing left to do on the next poll.

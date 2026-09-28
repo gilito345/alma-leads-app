@@ -5,7 +5,7 @@
 {% block eyebrow %}New lead{% endblock %}
 {% block heading %}{{ lead.full_name }}{% endblock %}
 {% block content %}
-{{ facts([("Name", lead.full_name), ("Email", lead.email), ("Resume", lead.resume_filename)]) }}
+{{ facts([("Name", lead.full_name), ("Email", lead.email)]) }}
 {{ button(lead_url, "Open in dashboard") }}
 {% call small() %}Reply to this email to write straight to the prospect. Once you've contacted them, mark the lead as reached out in the dashboard.{% endcall %}
 {% endblock %}

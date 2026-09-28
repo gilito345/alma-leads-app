@@ -2,7 +2,6 @@ New lead: {{ lead.full_name }}
 
 Name:   {{ lead.full_name }}
 Email:  {{ lead.email }}
-Resume: {{ lead.resume_filename }}
 
 Open in dashboard: {{ lead_url }}
 
