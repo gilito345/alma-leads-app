@@ -156,7 +156,7 @@ sequenceDiagram
     W->>A: POST /leads (multipart)
     A->>A: validate fields, file type (magic bytes), size
     A->>S: put resume object
-    A->>D: BEGIN; insert lead; insert 2 outbox rows; COMMIT
+    A->>D: one transaction: insert lead + 2 outbox rows
     A-->>W: 201 {id}
     W-->>P: "Thanks, we'll be in touch"
     loop every few seconds
