@@ -17,7 +17,7 @@ A public lead-intake form and an internal, auth-guarded dashboard for attorneys.
 | Email | Resend, sent by a background worker from a transactional outbox |
 | Web | Next.js 16 (App Router, TypeScript, Tailwind CSS 4) |
 
-The reasoning behind the architecture is in [`docs/DESIGN.md`](docs/DESIGN.md); the visual design (based on [tryalma.com](https://www.tryalma.com)) is in [`docs/STYLE_GUIDE.md`](docs/STYLE_GUIDE.md).
+The reasoning behind the architecture is in [`docs/DESIGN.md`](docs/DESIGN.md); the visual design (based on [tryalma.com](https://www.tryalma.com)) is in [`docs/STYLE_GUIDE.md`](docs/STYLE_GUIDE.md). How a coding agent was used to build it is in [`docs/AGENT_USAGE.md`](docs/AGENT_USAGE.md), with authorship in [`NOTES.md`](NOTES.md).
 
 ## Running locally
 
@@ -151,7 +151,8 @@ CI runs all of these on every push and pull request (`.github/workflows/ci.yml`)
 backend/     FastAPI app (app/), Alembic migrations, tests
 frontend/    Next.js app (src/app routes, src/components, src/lib)
 supabase/    Supabase CLI config for the local stack (config.toml)
-docs/        Design document (DESIGN.md) and style guide (STYLE_GUIDE.md)
+docs/        Design document, style guide, coding-agent usage
+NOTES.md     Authorship: agent-generated vs. human work
 docker-compose.yml, .env.example
 ```
 
