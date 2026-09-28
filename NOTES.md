@@ -1,6 +1,6 @@
 # Notes: Authorship
 
-This project was built with a coding agent, [Claude Code](https://claude.com/claude-code) (Claude Opus 5.5). How it was used is described in [`docs/AGENT_USAGE.md`](docs/AGENT_USAGE.md).
+This project was built with a coding agent, [Claude Code](https://claude.com/claude-code) (Claude Opus 5.5), in two sessions: a cloud session that designed and wrote the app, and a desktop session that ran, fixed and extended it. How it was used is described in [`docs/AGENT_USAGE.md`](docs/AGENT_USAGE.md).
 
 ## Agent-generated
 
@@ -18,8 +18,8 @@ Git records it too: every commit except GitHub's "Initial commit" is authored as
 
 ## Human
 
-- Requirements, scope and product decisions (e.g. invite-only accounts, the in-page resume viewer, the contact button, the lead form's wording).
+- Requirements, scope and product decisions: the platform (Supabase for database, auth and storage; Resend for real email), invite-only accounts, the in-page resume viewer, the contact button, and the lead form's wording.
 - Security and trade-off approvals (e.g. link lifetimes, `.doc` as download-only).
-- Review and manual end-to-end testing of every change in the running app, including the fixes those tests prompted.
-- Secrets: the Resend API key and local `.env` values were entered by hand and never shared with the agent.
+- Review and hands-on testing in the running app, which surfaced several of the fixes (the broken sign-in configuration, whole-row click targets, the email styling).
+- Secrets: the Resend API key was entered into `.env` by hand and never shared with the agent.
 - No application code was written by hand.
