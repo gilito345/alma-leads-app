@@ -111,3 +111,14 @@ Headings use `font-medium tracking-heading` (−0.03em); a second line or key ph
 - Text colors meet WCAG AA on their backgrounds: `ink`, `ink-soft` and `muted` on cream and white; white on `accent`, `moss` and `brand`; `#8C5A12` on `honey`.
 - Every interactive element keeps a visible focus style (2px `accent` outline, 2px offset).
 - Status is never shown by color alone: badges always carry their label.
+
+## 7. Email
+
+Emails use the same palette and components, adapted to what mail clients render. The shared frame is [`backend/app/templates/email/_layout.html`](../backend/app/templates/email/_layout.html), with building blocks in `_components.html`; each email only fills in its words.
+
+- **Frame:** `paper` background; the "Leads" wordmark in `brand` (20px, 600); a white card, 16px radius, 1px warm border, max 560px wide; a `muted` footer line under the card.
+- **Inside the card:** eyebrow (dot plus uppercase label), then a 26px/500 heading with −0.8px tracking; the key word may be colored `brand`. Body text is 15px/1.6 in `ink-soft`.
+- **Facts panel:** an `apple` block with uppercase `brand` labels over `ink` values (lead details, "what happens next").
+- **Button:** `accent` fill, white 15px/500 text, 12px radius, 14×24px padding. The color sits on a table cell so the whole button shows in clients that ignore padding on links.
+- **Type:** `Figtree, Arial, Helvetica, sans-serif`. Web fonts rarely load in mail, so most people see Arial.
+- **Rules:** tables and inline styles only (no `<style>`, variables, flexbox or shadows); repeat background colors as `bgcolor` for Outlook; every email has a plain-text version and a hidden preheader line for the inbox preview.

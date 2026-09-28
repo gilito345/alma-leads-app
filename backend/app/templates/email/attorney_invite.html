@@ -1,22 +1,12 @@
-<!doctype html>
-<html>
-  <body style="margin:0;padding:24px;background:#f6f7f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#1f2937;">
-    <table role="presentation" width="100%" style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:8px;padding:32px;">
-      <tr><td>
-        <h1 style="font-size:20px;margin:0 0 16px;">You're invited, {{ user.full_name }}.</h1>
-        <p style="font-size:15px;line-height:1.6;margin:0 0 20px;">
-          You've been given an attorney account on the leads dashboard. Choose a password to
-          finish setting it up.
-        </p>
-        <p style="margin:0 0 20px;">
-          <a href="{{ link }}" style="display:inline-block;background:#1f2937;color:#ffffff;text-decoration:none;font-size:15px;padding:10px 18px;border-radius:6px;">Set up your account</a>
-        </p>
-        <p style="font-size:13px;line-height:1.6;margin:0;color:#6b7280;">
-          The link works once and expires in {{ expiry_hours }} hours. If it has expired, ask
-          the colleague who invited you to send a new one. If you weren't expecting this, you
-          can ignore this email.
-        </p>
-      </td></tr>
-    </table>
-  </body>
-</html>
+{% extends "_layout.html" %}
+{% from "_components.html" import paragraph, button, small %}
+{% block title %}You're invited to the leads dashboard{% endblock %}
+{% block preheader %}Choose a password to finish setting up your attorney account.{% endblock %}
+{% block eyebrow %}Invitation{% endblock %}
+{% block heading %}You're invited, <span style="color:#054d2a;">{{ user.full_name }}.</span>{% endblock %}
+{% block content %}
+{% call paragraph() %}You've been given an attorney account on the leads dashboard. Choose a password to finish setting it up.{% endcall %}
+{{ button(link, "Set up your account") }}
+{% call small() %}The link works once and expires in {{ expiry_hours }} hours. If it has expired, ask the colleague who invited you to send a new one.{% endcall %}
+{% endblock %}
+{% block footer %}If you weren't expecting this invitation, you can ignore this email.{% endblock %}
