@@ -55,9 +55,7 @@ class BodySizeLimitMiddleware:
 
     async def _reject(self, send: Send) -> None:
         body = json.dumps(
-            error_body(
-                "payload_too_large", f"Request body exceeds {self.max_body_bytes} bytes"
-            )
+            error_body("payload_too_large", f"Request body exceeds {self.max_body_bytes} bytes")
         ).encode()
         await send(
             {

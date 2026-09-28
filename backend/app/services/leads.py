@@ -84,9 +84,7 @@ class LeadService:
     def list_leads(
         self, *, state: LeadState | None, page: int, page_size: int
     ) -> tuple[list[Lead], int]:
-        items, total = self.leads.list(
-            state=state, offset=(page - 1) * page_size, limit=page_size
-        )
+        items, total = self.leads.list(state=state, offset=(page - 1) * page_size, limit=page_size)
         return list(items), total
 
     def get_lead(self, lead_id: uuid.UUID) -> Lead:

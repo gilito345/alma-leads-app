@@ -92,13 +92,21 @@ class OutboxProcessor:
                 row.next_attempt_at = self.clock() + backoff_delay(row.attempts)
                 logger.warning(
                     "Email %s (%s) failed on attempt %d, retrying at %s: %s",
-                    row.id, row.kind.value, row.attempts, row.next_attempt_at, exc,
+                    row.id,
+                    row.kind.value,
+                    row.attempts,
+                    row.next_attempt_at,
+                    exc,
                 )
             else:
                 row.status = EmailStatus.FAILED
                 logger.error(
                     "Email %s (%s) for %s failed permanently after %d attempt(s): %s",
-                    row.id, row.kind.value, _subject(row), row.attempts, exc,
+                    row.id,
+                    row.kind.value,
+                    _subject(row),
+                    row.attempts,
+                    exc,
                 )
             return
 
@@ -120,9 +128,7 @@ class OutboxProcessor:
         # The link is minted now rather than when the email was queued, so no usable token
         # ever sits in the database. A retry mints a fresh one, which replaces the old one.
         try:
-            token_hash = self.supabase_auth.admin_generate_link(
-                _LINK_TYPES[row.kind], user.email
-            )
+            token_hash = self.supabase_auth.admin_generate_link(_LINK_TYPES[row.kind], user.email)
         except EmailTakenError as exc:
             raise EmailSendError("Invite was already accepted", retryable=False) from exc
         except UserNotFoundError as exc:

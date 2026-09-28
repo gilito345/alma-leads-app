@@ -109,9 +109,7 @@ class TestTokens:
         token = make_access_token(attorney.id, secret="some-other-secret-that-is-long-enough")
         assert client.get("/api/v1/auth/me", headers=bearer(token)).status_code == 401
 
-    def test_token_for_wrong_audience_is_rejected(
-        self, client: TestClient, attorney: User
-    ) -> None:
+    def test_token_for_wrong_audience_is_rejected(self, client: TestClient, attorney: User) -> None:
         token = make_access_token(attorney.id, audience="anon")
         assert client.get("/api/v1/auth/me", headers=bearer(token)).status_code == 401
 

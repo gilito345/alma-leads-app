@@ -10,6 +10,7 @@ Revision ID: 0002
 Revises: 0001
 Create Date: 2026-09-27
 """
+
 from collections.abc import Sequence
 
 import sqlalchemy as sa

@@ -15,7 +15,7 @@ def storage() -> Iterator[S3ObjectStorage]:
             "s3",
             region_name="us-east-1",
             aws_access_key_id="test",
-            aws_secret_access_key="test",  # noqa: S106
+            aws_secret_access_key="test",
         )
         yield S3ObjectStorage(client, "resumes", "us-east-1")
 

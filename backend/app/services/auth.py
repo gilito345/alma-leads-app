@@ -154,7 +154,9 @@ class AuthService:
 
         logger.info(
             "Attorney invite queued user=%s invited_by=%s resent=%s",
-            user.id, invited_by.id, existing is not None,
+            user.id,
+            invited_by.id,
+            existing is not None,
         )
         return InviteResponse(
             email=user.email, full_name=user.full_name, resent=existing is not None
