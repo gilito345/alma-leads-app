@@ -1,0 +1,7 @@
+You're invited, {{ user.full_name }}.
+
+You've been given an attorney account on the leads dashboard. Choose a password to finish setting it up:
+
+{{ link }}
+
+The link works once and expires in {{ expiry_hours }} hours. If it has expired, ask the colleague who invited you to send a new one. If you weren't expecting this, you can ignore this email.

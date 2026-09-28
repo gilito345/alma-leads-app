@@ -177,8 +177,8 @@ enable_refresh_token_rotation = true
 # Requires enable_refresh_token_rotation = true.
 refresh_token_reuse_interval = 10
 # Allow/disallow new user signups to your project.
-# Off: attorney accounts are created only through the backend's /auth/signup (first account or
-# invite code) or its CLI, which use the admin API. Public self-sign-up would bypass those rules.
+# Off: attorney accounts are created only by the backend through the admin API (invites from a
+# signed-in attorney, or its CLI for the first account). Public self-sign-up would bypass that.
 enable_signup = false
 # Allow/disallow anonymous sign-ins to your project.
 enable_anonymous_sign_ins = false
@@ -224,7 +224,9 @@ web3 = 30
 
 [auth.email]
 # Allow/disallow new user signups via email to your project.
-enable_signup = false
+# Must stay true: false disables the email provider entirely, which also blocks password sign-in.
+# Public self-sign-up is already turned off by [auth] enable_signup above.
+enable_signup = true
 # If enabled, a user will be required to confirm any email change on both the old, and new email
 # addresses. If disabled, only the new email is required to confirm.
 double_confirm_changes = true
@@ -237,7 +239,9 @@ max_frequency = "1s"
 # Number of characters used in the email OTP.
 otp_length = 6
 # Number of seconds before the email OTP expires (defaults to 1 hour).
-otp_expiry = 3600
+# Also how long invite and password-reset links stay valid. 24 hours (the maximum) gives
+# invitees time to act; keep AUTH_LINK_EXPIRY_HOURS in the backend settings in step.
+otp_expiry = 86400
 
 # Use a production-ready SMTP server
 # [auth.email.smtp]

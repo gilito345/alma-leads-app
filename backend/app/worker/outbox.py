@@ -12,13 +12,31 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import Settings
-from app.models import EmailOutbox, EmailStatus, Lead
-from app.services.email import EmailSender, EmailSendError, render_email
+from app.models import EmailKind, EmailOutbox, EmailStatus, Lead, User
+from app.services.email import (
+    EmailMessage,
+    EmailSender,
+    EmailSendError,
+    render_account_email,
+    render_email,
+)
+from app.services.supabase_auth import (
+    EmailTakenError,
+    LinkType,
+    SupabaseAuth,
+    SupabaseAuthClient,
+    UserNotFoundError,
+)
 
 logger = logging.getLogger(__name__)
 
 BASE_BACKOFF_SECONDS = 30
 MAX_BACKOFF_SECONDS = 60 * 60
+
+_LINK_TYPES: dict[EmailKind, LinkType] = {
+    EmailKind.ATTORNEY_INVITE: "invite",
+    EmailKind.PASSWORD_RESET: "recovery",
+}
 
 
 def backoff_delay(attempts: int) -> timedelta:
@@ -34,11 +52,13 @@ class OutboxProcessor:
         sender: EmailSender,
         settings: Settings,
         *,
+        supabase_auth: SupabaseAuth | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self.session_factory = session_factory
         self.sender = sender
         self.settings = settings
+        self.supabase_auth = supabase_auth or SupabaseAuthClient.from_settings(settings)
         self.clock = clock
 
     def process_batch(self) -> int:
@@ -63,10 +83,7 @@ class OutboxProcessor:
     def _deliver(self, db: Session, row: EmailOutbox) -> None:
         row.attempts += 1
         try:
-            lead = db.get(Lead, row.lead_id)
-            if lead is None:  # pragma: no cover - FK cascade makes this unreachable
-                raise EmailSendError("Lead no longer exists", retryable=False)
-            message = render_email(row.kind, lead, row.recipient, self.settings)
+            message = self._render(db, row)
             row.provider_message_id = self.sender.send(message, idempotency_key=str(row.id))
         except Exception as exc:
             retryable = exc.retryable if isinstance(exc, EmailSendError) else True
@@ -80,12 +97,38 @@ class OutboxProcessor:
             else:
                 row.status = EmailStatus.FAILED
                 logger.error(
-                    "Email %s (%s) to lead=%s failed permanently after %d attempt(s): %s",
-                    row.id, row.kind.value, row.lead_id, row.attempts, exc,
+                    "Email %s (%s) for %s failed permanently after %d attempt(s): %s",
+                    row.id, row.kind.value, _subject(row), row.attempts, exc,
                 )
             return
 
         row.status = EmailStatus.SENT
         row.sent_at = self.clock()
         row.last_error = None
-        logger.info("Email %s (%s) sent for lead=%s", row.id, row.kind.value, row.lead_id)
+        logger.info("Email %s (%s) sent for %s", row.id, row.kind.value, _subject(row))
+
+    def _render(self, db: Session, row: EmailOutbox) -> EmailMessage:
+        if row.lead_id is not None:
+            lead = db.get(Lead, row.lead_id)
+            if lead is None:  # pragma: no cover - FK cascade makes this unreachable
+                raise EmailSendError("Lead no longer exists", retryable=False)
+            return render_email(row.kind, lead, row.recipient, self.settings)
+
+        user = db.get(User, row.user_id) if row.user_id is not None else None
+        if user is None or not user.is_active:
+            raise EmailSendError("Account no longer exists or is deactivated", retryable=False)
+        # The link is minted now rather than when the email was queued, so no usable token
+        # ever sits in the database. A retry mints a fresh one, which replaces the old one.
+        try:
+            token_hash = self.supabase_auth.admin_generate_link(
+                _LINK_TYPES[row.kind], user.email
+            )
+        except EmailTakenError as exc:
+            raise EmailSendError("Invite was already accepted", retryable=False) from exc
+        except UserNotFoundError as exc:
+            raise EmailSendError("Supabase Auth user no longer exists", retryable=False) from exc
+        return render_account_email(row.kind, user, token_hash, self.settings)
+
+
+def _subject(row: EmailOutbox) -> str:
+    return f"lead={row.lead_id}" if row.lead_id is not None else f"user={row.user_id}"

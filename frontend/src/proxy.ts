@@ -52,7 +52,7 @@ export async function proxy(request: NextRequest) {
 export default proxy;
 
 export const config = {
-  matcher: ["/leads", "/leads/:path*", "/api/leads/:id/resume"],
+  matcher: ["/leads", "/leads/:path*", "/invite", "/api/leads/:id/resume"],
 };
 
 async function refreshSession(refreshToken: string): Promise<SessionTokens | null> {

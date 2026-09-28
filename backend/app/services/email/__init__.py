@@ -2,7 +2,7 @@ from app.core.config import Settings
 from app.services.email.base import EmailMessage, EmailSender, EmailSendError
 from app.services.email.console import ConsoleEmailSender
 from app.services.email.resend import ResendEmailSender
-from app.services.email.templates import render_email
+from app.services.email.templates import render_account_email, render_email
 
 
 def build_email_sender(settings: Settings) -> EmailSender:
@@ -18,5 +18,6 @@ __all__ = [
     "EmailSender",
     "ResendEmailSender",
     "build_email_sender",
+    "render_account_email",
     "render_email",
 ]

@@ -9,6 +9,12 @@ import os
 from collections.abc import Iterator
 from pathlib import Path
 
+import email_validator
+
+# Test addresses use the reserved .test domain, which email-validator (behind pydantic's
+# EmailStr) rejects unless it's told it's running in a test environment.
+email_validator.TEST_ENVIRONMENT = True
+
 os.environ.setdefault(
     "TEST_DATABASE_URL", "postgresql+psycopg://postgres:postgres@localhost:5432/leads_test"
 )

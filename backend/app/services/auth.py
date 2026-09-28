@@ -1,7 +1,6 @@
-import hmac
 import logging
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
@@ -13,14 +12,16 @@ from app.core.errors import (
     InvalidInputError,
 )
 from app.core.security import TokenVerifier
-from app.models import User
+from app.models import EmailKind, EmailOutbox, User
 from app.repositories.users import UserRepository
-from app.schemas.auth import SignupStatus
+from app.schemas.auth import InviteResponse
 from app.services.supabase_auth import (
     AuthSession,
     EmailTakenError,
     InvalidCredentialsError,
+    InvalidLinkError,
     InvalidRefreshTokenError,
+    LinkType,
     SupabaseAuth,
     SupabaseAuthError,
     WeakPasswordError,
@@ -28,9 +29,9 @@ from app.services.supabase_auth import (
 
 logger = logging.getLogger(__name__)
 
-# Arbitrary constant: serializes sign-ups so two "first" accounts can't race past the check.
-_SIGNUP_LOCK_KEY = 72_017_001
 MIN_PASSWORD_LENGTH = 12
+# At most one reset email per account in this window, however many IPs ask for it.
+PASSWORD_RESET_COOLDOWN = timedelta(minutes=1)
 
 
 class UpstreamAuthError(AppError):
@@ -48,6 +49,8 @@ class AuthService:
 
     Supabase Auth owns identities, passwords and sessions. The `users` table records which
     Supabase users are attorneys (and their display names); only they can use the dashboard.
+    Nobody can sign themselves up: accounts come from an invite sent by a signed-in attorney,
+    or from the CLI (how the first account is made).
     """
 
     def __init__(
@@ -109,55 +112,138 @@ class AuthService:
             raise ForbiddenError("This account doesn't have access", code="not_an_attorney")
         return user
 
-    # --- sign-up --------------------------------------------------------------------------
+    # --- invites --------------------------------------------------------------------------
 
-    def signup_status(self) -> SignupStatus:
-        code_configured = self.settings.attorney_signup_code is not None
-        first_account = self.users.count() == 0
-        return SignupStatus(
-            open=first_account,
-            invite_code_required=not first_account and code_configured,
-            enabled=first_account or code_configured,
+    def invite(self, email: str, full_name: str, invited_by: User) -> InviteResponse:
+        """Create an attorney account without a password and email them a link to set one.
+
+        Inviting someone whose invite is still pending sends a fresh link (the old one stops
+        working). Inviting someone who already accepted is a conflict.
+        """
+        normalized = email.strip().lower()
+        name = full_name.strip()
+        existing = self.users.get_by_email(normalized)
+
+        created_in_supabase = False
+        if existing is not None:
+            if not existing.is_active or self._has_accepted(existing):
+                raise _email_taken(normalized)
+            user = existing
+        else:
+            try:
+                user_id = self.supabase.admin_create_user(normalized, None, name)
+            except EmailTakenError as exc:
+                # A Supabase identity with no attorney record (e.g. made in Studio).
+                raise _email_taken(normalized) from exc
+            except SupabaseAuthError as exc:
+                raise _upstream(exc) from exc
+            created_in_supabase = True
+            user = User(id=user_id, email=normalized, full_name=name, is_active=True)
+            self.users.add(user)
+
+        try:
+            self.db.flush()  # the outbox row references the user
+            self._queue_email(EmailKind.ATTORNEY_INVITE, user)
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            if created_in_supabase:
+                # Don't leave a Supabase identity behind without its attorney record.
+                self.supabase.admin_delete_user(user.id)
+            raise
+
+        logger.info(
+            "Attorney invite queued user=%s invited_by=%s resent=%s",
+            user.id, invited_by.id, existing is not None,
+        )
+        return InviteResponse(
+            email=user.email, full_name=user.full_name, resent=existing is not None
         )
 
-    def signup(
-        self, email: str, full_name: str, password: str, invite_code: str | None
-    ) -> AuthSession:
-        """Self-service attorney sign-up; returns a session for the new account.
+    def accept_invite(self, token: str, password: str) -> AuthSession:
+        return self._redeem_link("invite", token, password)
 
-        The first account needs no code (bootstrapping a fresh install). After that, the
-        caller must present ATTORNEY_SIGNUP_CODE; without one configured, sign-up is closed.
+    def _has_accepted(self, user: User) -> bool:
+        try:
+            return self.supabase.admin_is_confirmed(user.id)
+        except SupabaseAuthError as exc:
+            raise _upstream(exc) from exc
+
+    # --- password reset -------------------------------------------------------------------
+
+    def request_password_reset(self, email: str) -> None:
+        """Queue a reset email if `email` belongs to an active attorney; otherwise do nothing.
+
+        The caller gets the same answer either way, so this can't be used to find accounts.
         """
-        self.db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": _SIGNUP_LOCK_KEY})
-        if self.users.count() > 0:
-            expected = self.settings.attorney_signup_code
-            if expected is None:
-                self.db.rollback()
-                raise ForbiddenError(
-                    "Sign-up is closed. Ask an existing attorney to create your account.",
-                    code="signup_closed",
-                )
-            if not invite_code or not hmac.compare_digest(
-                invite_code.strip().encode(), expected.get_secret_value().encode()
-            ):
-                self.db.rollback()
-                raise ForbiddenError(
-                    "That invite code isn't valid.",
-                    code="invalid_invite_code",
-                    details=[{"field": "invite_code", "message": "Invalid invite code"}],
-                )
+        user = self.users.get_by_email(email.strip().lower())
+        if user is None or not user.is_active:
+            return
+        since = datetime.now(UTC) - PASSWORD_RESET_COOLDOWN
+        if self.users.has_recent_email(user.id, EmailKind.PASSWORD_RESET, since):
+            return
+        self._queue_email(EmailKind.PASSWORD_RESET, user)
+        self.db.commit()
+        logger.info("Password reset email queued user=%s", user.id)
 
-        self.create_user(email, full_name, password)
-        return self.login(email, password)
+    def reset_password(self, token: str, password: str) -> AuthSession:
+        session = self._redeem_link("recovery", token, password)
+        # Anyone who was signed in with the old password is signed out.
+        self.supabase.sign_out(session.access_token, scope="others")
+        return session
+
+    # --- links ----------------------------------------------------------------------------
+
+    def _redeem_link(self, link_type: LinkType, token: str, password: str) -> AuthSession:
+        """Redeem an emailed link, set the account's password and return a signed-in session.
+
+        The password is checked first: redeeming burns the link, so a password Supabase would
+        reject must not get that far.
+        """
+        _check_password(password)
+        try:
+            session = self.supabase.verify_link(link_type, token.strip())
+        except InvalidLinkError as exc:
+            raise AuthenticationError(
+                "This link is invalid, already used or expired", code="invalid_link"
+            ) from exc
+        except SupabaseAuthError as exc:
+            raise _upstream(exc) from exc
+
+        user = self.users.get(session.user_id)
+        if user is None or not user.is_active:
+            self.supabase.sign_out(session.access_token)
+            raise AuthenticationError(
+                "This link is invalid, already used or expired", code="invalid_link"
+            )
+
+        try:
+            self.supabase.admin_set_password(user.id, password)
+        except WeakPasswordError as exc:
+            self.supabase.sign_out(session.access_token)
+            raise InvalidInputError(
+                "Password is too weak",
+                details=[{"field": "password", "message": "Too weak"}],
+            ) from exc
+        except SupabaseAuthError as exc:
+            self.supabase.sign_out(session.access_token)
+            raise _upstream(exc) from exc
+        logger.info("Password set via %s link user=%s", link_type, user.id)
+        return session
+
+    def _queue_email(self, kind: EmailKind, user: User) -> None:
+        self.db.add(EmailOutbox(user_id=user.id, kind=kind, recipient=user.email))
+
+    # --- CLI ------------------------------------------------------------------------------
 
     def create_user(self, email: str, full_name: str, password: str) -> User:
-        """Create the Supabase identity and the matching attorney record."""
-        if len(password) < MIN_PASSWORD_LENGTH:
+        """Create a ready-to-use account with a password. Used by the CLI, which is how the
+        first attorney is made; everyone after that is invited from the dashboard."""
+        try:
+            _check_password(password)
+        except InvalidInputError:
             self.db.rollback()
-            raise InvalidInputError(
-                f"Password must be at least {MIN_PASSWORD_LENGTH} characters",
-                details=[{"field": "password", "message": "Too short"}],
-            )
+            raise
         normalized = email.strip().lower()
         if self.users.get_by_email(normalized) is not None:
             self.db.rollback()
@@ -190,6 +276,14 @@ class AuthService:
         self.db.refresh(user)
         logger.info("Attorney account created id=%s", user.id)
         return user
+
+
+def _check_password(password: str) -> None:
+    if len(password) < MIN_PASSWORD_LENGTH:
+        raise InvalidInputError(
+            f"Password must be at least {MIN_PASSWORD_LENGTH} characters",
+            details=[{"field": "password", "message": "Too short"}],
+        )
 
 
 def _email_taken(email: str) -> ConflictError:

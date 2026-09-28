@@ -68,23 +68,24 @@ docker compose up --build
 
 This builds and starts the API (which applies the database migrations on startup), the email worker and the web app.
 
-**4. Create your attorney account**
+**4. Create the first attorney account**
 
-Open http://localhost:3000/signup. The first account needs no invite code. After that, sign-up requires the `ATTORNEY_SIGNUP_CODE` from `.env`, or is closed if you leave it empty, so strangers can't create accounts and see leads.
-
-You can also create accounts from the command line:
+There's no public sign-up, so strangers can't create accounts and see leads. Create the first account from the command line (it prompts for a password of at least 12 characters):
 
 ```bash
 docker compose exec api python -m app.cli create-user --email you@example.com --name "Your Name"
 ```
+
+Then sign in at http://localhost:3000/login. To add colleagues, use **Invite attorney** in the dashboard header: they get an email with a single-use link to choose their password (it expires after 24 hours; inviting them again sends a fresh one). Forgotten passwords are reset from **Forgot your password?** on the sign-in page. Without a `RESEND_API_KEY`, these emails, links included, appear in `docker compose logs -f worker`.
 
 **5. Try it**
 
 | URL | What |
 |---|---|
 | http://localhost:3000/apply | Public lead form |
-| http://localhost:3000/signup | Create an attorney account |
 | http://localhost:3000/login | Attorney sign-in, then the dashboard at `/leads` |
+| http://localhost:3000/invite | Invite another attorney (signed in) |
+| http://localhost:3000/forgot-password | Email yourself a password-reset link |
 | http://localhost:8000/docs | Interactive API docs (OpenAPI) |
 | http://localhost:54323 | Supabase Studio: browse tables, auth users and uploaded resumes |
 
@@ -94,7 +95,7 @@ Submit the form with a PDF, DOC or DOCX, then watch `docker compose logs -f work
 
 ### Using a hosted Supabase project instead
 
-Create a project at [supabase.com](https://supabase.com), then in `.env` set `SUPABASE_URL` to the project URL, `SUPABASE_PUBLISHABLE_KEY` and `SUPABASE_SECRET_KEY` from *Project Settings → API Keys*, and `DATABASE_URL` to the connection string (with the `postgresql+psycopg://` scheme). Create a private bucket named `resumes`, and turn off new-user sign-ups in the project's Auth settings (accounts are created through the app's guarded `/signup` instead). Skip `supabase start`.
+Create a project at [supabase.com](https://supabase.com), then in `.env` set `SUPABASE_URL` to the project URL, `SUPABASE_PUBLISHABLE_KEY` and `SUPABASE_SECRET_KEY` from *Project Settings → API Keys*, and `DATABASE_URL` to the connection string (with the `postgresql+psycopg://` scheme). Create a private bucket named `resumes`. In the project's Auth settings, turn off *Allow new users to sign up* (accounts are only created by the backend: the CLI and invites) but keep the Email provider enabled, since disabling it also blocks password sign-in; set the email OTP expiry to 86400 seconds to match the 24-hour links. Skip `supabase start`.
 
 ## Running without Docker (for development)
 
@@ -161,7 +162,10 @@ docker-compose.yml, .env.example
 | `POST` | `/api/v1/auth/login` | Public; returns a Supabase session |
 | `POST` | `/api/v1/auth/refresh` | Public (with a refresh token) |
 | `POST` | `/api/v1/auth/logout` | Attorney |
-| `GET` / `POST` | `/api/v1/auth/signup` | Public (first account, or with the invite code) |
+| `POST` | `/api/v1/auth/invites` (`{"email", "full_name"}`) | Attorney |
+| `POST` | `/api/v1/auth/invites/accept` (`{"token", "password"}`) | Public (with an invite link's token); returns a session |
+| `POST` | `/api/v1/auth/password-reset` (`{"email"}`) | Public; same answer whether or not the account exists |
+| `POST` | `/api/v1/auth/password-reset/confirm` (`{"token", "password"}`) | Public (with a reset link's token); returns a session |
 | `GET` | `/api/v1/auth/me` | Attorney |
 | `GET` | `/healthz` | Public |
 

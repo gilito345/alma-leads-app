@@ -13,7 +13,10 @@ export default async function InternalLayout({ children }: { children: React.Rea
           <Link href="/leads" className="font-serif text-xl text-ink">
             Leads
           </Link>
-          <div className="flex items-center gap-4 text-sm">
+          <div className="flex items-center gap-2 text-sm sm:gap-4">
+            <Link href="/invite" className="rounded-md px-3 py-1.5 text-ink-soft hover:bg-paper">
+              Invite attorney
+            </Link>
             <span className="hidden max-w-[16rem] truncate text-muted sm:inline">{user.full_name}</span>
             <form action={logoutAction}>
               <button type="submit" className="rounded-md px-3 py-1.5 text-ink-soft hover:bg-paper">

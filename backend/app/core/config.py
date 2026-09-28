@@ -41,9 +41,9 @@ class Settings(BaseSettings):
     s3_bucket: str = "resumes"
     s3_region: str = "us-east-1"
 
-    # Attorney accounts
-    # Required to create attorney accounts once at least one exists. Unset = sign-up closed.
-    attorney_signup_code: SecretStr | None = None
+    # Attorney accounts. Invite and password-reset links expire after this long; it's shown in
+    # the emails and must match `otp_expiry` under [auth.email] in supabase/config.toml.
+    auth_link_expiry_hours: int = 24
 
     # Email
     resend_api_key: SecretStr | None = None
@@ -67,7 +67,6 @@ class Settings(BaseSettings):
         "s3_access_key_id",
         "s3_secret_access_key",
         "resend_api_key",
-        "attorney_signup_code",
         "supabase_jwt_secret",
         mode="before",
     )

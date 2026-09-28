@@ -1,15 +1,19 @@
 import uuid
-from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from fastapi.testclient import TestClient
-from pydantic import SecretStr
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.core.errors import ConflictError, InvalidInputError
-from app.main import create_app
-from app.models import User
+from app.db.session import get_sessionmaker
+from app.models import EmailKind, EmailOutbox, User
 from app.services.auth import AuthService
+from app.services.email import ConsoleEmailSender, EmailMessage
+from app.worker.outbox import OutboxProcessor
 from tests.fakes import FakeSupabaseAuth, make_access_token
 from tests.helpers import ATTORNEY_PASSWORD
 
@@ -143,78 +147,239 @@ class TestCreateUser:
             auth_service.create_user("taken@firm.test", "New", "a-long-enough-pass")
 
 
-def signup(client: TestClient, **overrides: str):
-    body = {
-        "email": "new@firm.test",
-        "full_name": "New Attorney",
-        "password": "a-long-enough-password",
-    }
+NEW_PASSWORD = "a-brand-new-long-password"
+
+
+def outbox_rows(db: Session, kind: EmailKind) -> list[EmailOutbox]:
+    db.expire_all()
+    return list(db.scalars(select(EmailOutbox).where(EmailOutbox.kind == kind)).all())
+
+
+def deliver_emails(settings: Settings, supabase_auth: FakeSupabaseAuth) -> ConsoleEmailSender:
+    """Run the worker once, the way it would pick up the queued emails."""
+    sender = ConsoleEmailSender()
+    OutboxProcessor(
+        get_sessionmaker(),
+        sender,
+        settings,
+        supabase_auth=supabase_auth,
+        clock=lambda: datetime.now(UTC) + timedelta(seconds=1),
+    ).process_batch()
+    return sender
+
+
+def link_token(message: EmailMessage, page: str) -> str:
+    link = next(word for word in message.text.split() if f"{page}?token=" in word)
+    return parse_qs(urlsplit(link).query)["token"][0]
+
+
+def invite(client: TestClient, headers: dict[str, str], **overrides: str):
+    body = {"email": "new@firm.test", "full_name": "New Attorney"}
     body.update(overrides)
-    return client.post("/api/v1/auth/signup", json=body)
+    return client.post("/api/v1/auth/invites", json=body, headers=headers)
 
 
-@pytest.fixture
-def client_with_invite_code(
-    settings: Settings, storage, supabase_auth, token_verifier
-) -> Iterator[TestClient]:
-    configured = settings.model_copy(update={"attorney_signup_code": SecretStr("join-the-firm")})
-    app = create_app(
-        configured, storage=storage, supabase_auth=supabase_auth, token_verifier=token_verifier
-    )
-    with TestClient(app) as test_client:
-        yield test_client
+class TestInvites:
+    def test_requires_a_signed_in_attorney(self, client: TestClient) -> None:
+        assert invite(client, {}).status_code == 401
 
+    def test_creates_a_pending_account_and_queues_the_email(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        db: Session,
+        supabase_auth: FakeSupabaseAuth,
+    ) -> None:
+        response = invite(client, auth_headers, email="New@Firm.test", full_name=" New A ")
 
-class TestSignup:
-    def test_first_account_needs_no_code_and_is_signed_in(self, client: TestClient) -> None:
-        assert client.get("/api/v1/auth/signup").json() == {
-            "open": True,
-            "invite_code_required": False,
-            "enabled": True,
+        assert response.status_code == 202, response.text
+        assert response.json() == {
+            "email": "new@firm.test",
+            "full_name": "New A",
+            "resent": False,
         }
+        (row,) = outbox_rows(db, EmailKind.ATTORNEY_INVITE)
+        user_id = supabase_auth.users["new@firm.test"][0]
+        assert row.user_id == user_id
+        assert row.lead_id is None
+        assert row.recipient == "new@firm.test"
+        assert user_id not in supabase_auth.confirmed
+        # No password yet, so nobody can sign in as them before they accept.
+        assert login(client, "new@firm.test", "any-guess-at-all").status_code == 401
 
-        response = signup(client)
+    def test_accepting_sets_the_password_and_signs_in(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        settings: Settings,
+        supabase_auth: FakeSupabaseAuth,
+    ) -> None:
+        invite(client, auth_headers)
+        sender = deliver_emails(settings, supabase_auth)
+        (message,) = [m for m in sender.sent if m.to == "new@firm.test"]
+        assert message.subject == "You're invited to the leads dashboard"
+        assert "http://web.test/accept-invite?token=" in message.html
+        assert "expires in 24 hours" in message.text
+        token = link_token(message, "/accept-invite")
 
-        assert response.status_code == 201, response.text
+        response = client.post(
+            "/api/v1/auth/invites/accept", json={"token": token, "password": NEW_PASSWORD}
+        )
+
+        assert response.status_code == 200, response.text
         me = client.get("/api/v1/auth/me", headers=bearer(response.json()["access_token"]))
         assert me.json()["email"] == "new@firm.test"
         assert me.json()["full_name"] == "New Attorney"
+        assert login(client, "new@firm.test", NEW_PASSWORD).status_code == 200
 
-    def test_closed_after_first_account_without_code(
-        self, client: TestClient, attorney: User
-    ) -> None:
-        assert client.get("/api/v1/auth/signup").json()["enabled"] is False
-        response = signup(client)
-        assert response.status_code == 403
-        assert response.json()["error"]["code"] == "signup_closed"
-
-    def test_invite_code_required_after_first_account(
-        self, client_with_invite_code: TestClient, attorney: User
-    ) -> None:
-        client = client_with_invite_code
-        assert client.get("/api/v1/auth/signup").json() == {
-            "open": False,
-            "invite_code_required": True,
-            "enabled": True,
-        }
-
-        wrong = signup(client, invite_code="guess")
-        assert wrong.status_code == 403
-        assert wrong.json()["error"]["code"] == "invalid_invite_code"
-        assert signup(client).status_code == 403
-
-        assert signup(client, invite_code=" join-the-firm ").status_code == 201
-
-    def test_duplicate_email_with_code(
-        self, client_with_invite_code: TestClient, attorney: User
-    ) -> None:
-        response = signup(
-            client_with_invite_code, email="JANE@firm.test", invite_code="join-the-firm"
+        reused = client.post(
+            "/api/v1/auth/invites/accept", json={"token": token, "password": NEW_PASSWORD}
         )
+        assert reused.status_code == 401
+        assert reused.json()["error"]["code"] == "invalid_link"
+
+    def test_reinviting_a_pending_invitee_sends_a_new_link(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        db: Session,
+        settings: Settings,
+        supabase_auth: FakeSupabaseAuth,
+    ) -> None:
+        invite(client, auth_headers)
+        deliver_emails(settings, supabase_auth)
+        first_token = supabase_auth.token_for("new@firm.test")
+
+        response = invite(client, auth_headers, email="NEW@firm.test")
+
+        assert response.status_code == 202
+        assert response.json()["resent"] is True
+        assert len(outbox_rows(db, EmailKind.ATTORNEY_INVITE)) == 2
+        deliver_emails(settings, supabase_auth)
+        accept_old = client.post(
+            "/api/v1/auth/invites/accept", json={"token": first_token, "password": NEW_PASSWORD}
+        )
+        assert accept_old.status_code == 401
+
+    def test_inviting_an_existing_attorney_is_a_conflict(
+        self, client: TestClient, auth_headers: dict[str, str], attorney: User
+    ) -> None:
+        response = invite(client, auth_headers, email="JANE@firm.test")
         assert response.status_code == 409
         assert response.json()["error"]["code"] == "email_taken"
 
-    def test_short_password(self, client: TestClient) -> None:
-        response = signup(client, password="short")
-        assert response.status_code == 422
-        assert response.json()["error"]["details"][0]["field"] == "password"
+    def test_inviting_a_supabase_identity_without_attorney_record_is_a_conflict(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        supabase_auth: FakeSupabaseAuth,
+    ) -> None:
+        supabase_auth.admin_create_user("outsider@firm.test", "some-long-password", "Outsider")
+        assert invite(client, auth_headers, email="outsider@firm.test").status_code == 409
+
+    def test_short_password_is_rejected_without_using_up_the_link(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        settings: Settings,
+        supabase_auth: FakeSupabaseAuth,
+    ) -> None:
+        invite(client, auth_headers)
+        deliver_emails(settings, supabase_auth)
+        token = supabase_auth.token_for("new@firm.test")
+
+        short = client.post(
+            "/api/v1/auth/invites/accept", json={"token": token, "password": "short"}
+        )
+        assert short.status_code == 422
+        assert short.json()["error"]["details"][0]["field"] == "password"
+
+        ok = client.post(
+            "/api/v1/auth/invites/accept", json={"token": token, "password": NEW_PASSWORD}
+        )
+        assert ok.status_code == 200
+
+    def test_unknown_token_is_rejected(self, client: TestClient) -> None:
+        response = client.post(
+            "/api/v1/auth/invites/accept", json={"token": "nope", "password": NEW_PASSWORD}
+        )
+        assert response.status_code == 401
+        assert response.json()["error"]["code"] == "invalid_link"
+
+    def test_signup_endpoints_are_gone(self, client: TestClient) -> None:
+        assert client.get("/api/v1/auth/signup").status_code in (404, 405)
+        body = {"email": "x@firm.test", "full_name": "X", "password": NEW_PASSWORD}
+        assert client.post("/api/v1/auth/signup", json=body).status_code in (404, 405)
+
+
+def request_reset(client: TestClient, email: str):
+    return client.post("/api/v1/auth/password-reset", json={"email": email})
+
+
+class TestPasswordReset:
+    def test_unknown_email_gets_the_same_answer_and_nothing_is_sent(
+        self, client: TestClient, db: Session, attorney: User
+    ) -> None:
+        known = request_reset(client, attorney.email)
+        unknown = request_reset(client, "nobody@firm.test")
+
+        assert known.status_code == unknown.status_code == 202
+        assert known.json() == unknown.json()
+        (row,) = outbox_rows(db, EmailKind.PASSWORD_RESET)
+        assert row.user_id == attorney.id
+
+    def test_repeat_requests_within_a_minute_send_one_email(
+        self, client: TestClient, db: Session, attorney: User
+    ) -> None:
+        for _ in range(3):
+            assert request_reset(client, "Jane@Firm.test").status_code == 202
+        assert len(outbox_rows(db, EmailKind.PASSWORD_RESET)) == 1
+
+    def test_deactivated_attorney_gets_no_email(
+        self, client: TestClient, db: Session, attorney: User, auth_service: AuthService
+    ) -> None:
+        attorney.is_active = False
+        auth_service.db.commit()
+        assert request_reset(client, attorney.email).status_code == 202
+        assert outbox_rows(db, EmailKind.PASSWORD_RESET) == []
+
+    def test_reset_sets_the_new_password_and_signs_out_other_sessions(
+        self,
+        client: TestClient,
+        attorney: User,
+        settings: Settings,
+        supabase_auth: FakeSupabaseAuth,
+    ) -> None:
+        request_reset(client, attorney.email)
+        sender = deliver_emails(settings, supabase_auth)
+        (message,) = sender.sent
+        assert message.subject == "Reset your password"
+        token = link_token(message, "/reset-password")
+
+        response = client.post(
+            "/api/v1/auth/password-reset/confirm",
+            json={"token": token, "password": NEW_PASSWORD},
+        )
+
+        assert response.status_code == 200, response.text
+        assert client.get(
+            "/api/v1/auth/me", headers=bearer(response.json()["access_token"])
+        ).is_success
+        assert supabase_auth.signed_out_scopes == ["others"]
+        assert login(client, attorney.email, ATTORNEY_PASSWORD).status_code == 401
+        assert login(client, attorney.email, NEW_PASSWORD).status_code == 200
+
+    def test_reset_token_cannot_accept_an_invite(
+        self,
+        client: TestClient,
+        attorney: User,
+        settings: Settings,
+        supabase_auth: FakeSupabaseAuth,
+    ) -> None:
+        request_reset(client, attorney.email)
+        deliver_emails(settings, supabase_auth)
+        token = supabase_auth.token_for(attorney.email)
+        response = client.post(
+            "/api/v1/auth/invites/accept", json={"token": token, "password": NEW_PASSWORD}
+        )
+        assert response.status_code == 401

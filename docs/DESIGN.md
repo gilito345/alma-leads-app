@@ -17,7 +17,7 @@ These are gaps in the brief that I filled with a decision. Each is cheap to chan
 | Topic | Decision |
 |---|---|
 | Who gets the attorney email | A single configurable intake address (`ATTORNEY_NOTIFICATION_EMAIL`). Routing to a specific attorney or round-robin is a later feature. |
-| Who can log in | Attorneys only, and all attorneys see all leads. Accounts come from a guarded sign-up page (see §7) or a CLI command. |
+| Who can log in | Attorneys only, and all attorneys see all leads. There is no public sign-up: the first account comes from a CLI command, and every later one from an email invite sent by a signed-in attorney (see §7). |
 | State machine | `PENDING → REACHED_OUT` only. The reverse transition is rejected. Recording *who* marked it and *when* is kept for audit. |
 | Duplicate submissions | Allowed. The same email may apply more than once (e.g. with an updated CV); each submission is its own lead. |
 | Resume formats | PDF, DOC, DOCX, max 10 MB. |
@@ -69,6 +69,7 @@ Locally, Supabase runs through the Supabase CLI (`supabase start`, configured by
 erDiagram
     USERS ||--o{ LEADS : "marked reached out"
     LEADS ||--o{ EMAIL_OUTBOX : "triggers"
+    USERS ||--o{ EMAIL_OUTBOX : "invite / password reset"
 
     USERS {
         uuid id PK "= Supabase Auth user id"
@@ -94,8 +95,9 @@ erDiagram
     }
     EMAIL_OUTBOX {
         uuid id PK
-        uuid lead_id FK
-        enum kind "PROSPECT_CONFIRMATION | ATTORNEY_NOTIFICATION"
+        uuid lead_id FK "set for lead emails"
+        uuid user_id FK "set for account emails"
+        enum kind "PROSPECT_CONFIRMATION | ATTORNEY_NOTIFICATION | ATTORNEY_INVITE | PASSWORD_RESET"
         string recipient
         enum status "PENDING | SENT | FAILED"
         int attempts
@@ -109,7 +111,7 @@ erDiagram
 
 Indexes: `leads(state, created_at desc)` for the dashboard's default view, `leads(email)` for lookup, `email_outbox(status, next_attempt_at)` for the worker's poll.
 
-`users` holds only attorneys: Supabase Auth owns the identity and password, and a row here is what grants dashboard access. Resume files live in Supabase Storage; `resume_object_key` points at them.
+`users` holds only attorneys: Supabase Auth owns the identity and password, and a row here is what grants dashboard access. An invited attorney has a row from the moment they're invited, but no password (and so no way to sign in) until they accept. Each `email_outbox` row belongs to exactly one lead or one attorney (a check constraint enforces it). Resume files live in Supabase Storage; `resume_object_key` points at them.
 
 Schema changes go through **Alembic** migrations, which run automatically when the API container starts. (Supabase's own `supabase/migrations` isn't used, so the same migrations run against plain Postgres in CI.)
 
@@ -127,8 +129,10 @@ Base path `/api/v1` (health check at the root). OpenAPI docs at `/docs`.
 | `POST` | `/auth/login` | Public | Email + password → Supabase session (access + refresh token). Attorneys only. |
 | `POST` | `/auth/refresh` | Public | Refresh token → new session (Supabase rotates the refresh token). |
 | `POST` | `/auth/logout` | Attorney | Revoke the Supabase session. |
-| `GET` | `/auth/signup` | Public | Whether sign-up is open and needs an invite code. |
-| `POST` | `/auth/signup` | Public | Create an attorney account (rules in §7) and return a session. |
+| `POST` | `/auth/invites` | Attorney | Invite an attorney by email, or re-send a pending invite (§7). `409` if they already have an account. |
+| `POST` | `/auth/invites/accept` | Public | Invite token + password → sets the password and returns a session. |
+| `POST` | `/auth/password-reset` | Public | Email a reset link. Same `202` answer whether or not the account exists. |
+| `POST` | `/auth/password-reset/confirm` | Public | Reset token + new password → sets it, signs out other sessions, returns a session. |
 | `GET` | `/auth/me` | Attorney | Current user. |
 | `GET` | `/healthz` | Public | Liveness/readiness (checks DB). |
 
@@ -182,6 +186,8 @@ This uses Postgres as the queue, so there's no Redis/RabbitMQ to operate. At muc
 
 Email bodies are Jinja2 templates (HTML + plain-text) in the API codebase.
 
+**Account emails use the same outbox.** Attorney invites and password resets are queued the same way (`user_id` instead of `lead_id`), so they get the same retries, idempotency, templates and provider as lead emails, and Supabase never has to send mail itself (no second SMTP setup, and none of Supabase's built-in email rate limits). The row stores no secret: the worker asks Supabase for a fresh single-use link (`/admin/generate_link`) at the moment it sends. So a database dump or backup never contains a usable invite or reset link. A retry mints a new link, which replaces the previous one.
+
 > **Resend domain note:** until a sending domain is verified in Resend, the sandbox sender only delivers to the Resend account owner's own address. For a demo, set both the prospect email (in the form) and `ATTORNEY_NOTIFICATION_EMAIL` to that address, or verify a domain.
 
 ## 7. Authentication and authorization
@@ -194,19 +200,22 @@ Email bodies are Jinja2 templates (HTML + plain-text) in the API codebase.
 
 **Authorization: every API request.** `get_current_user` verifies the bearer token's signature against Supabase's **JWKS** (`/auth/v1/.well-known/jwks.json`, ES256; HS256 is accepted only if a legacy secret is configured), checks `exp` and `aud=authenticated`, then requires an active attorney row for `sub`. Signed-in but not an attorney → `403`.
 
-**Account creation is guarded**, because any account can read every lead's personal data and resume:
+**Accounts are invite-only**, because any account can read every lead's personal data and resume:
 
-- Public self-sign-up is **off in Supabase** (`enable_signup = false`), so nobody can create an identity by calling Supabase directly. Only the backend can, through the admin API.
-- The **first** attorney can sign up at `/signup` with no code, so a fresh install is usable without a terminal. After that, `/signup` needs the team invite code (`ATTORNEY_SIGNUP_CODE`, compared in constant time), or is closed if none is configured.
-- A Postgres advisory lock serializes sign-ups, so two people can't both claim "first account" at once. Sign-up and login are rate-limited.
-- `python -m app.cli create-user` remains for scripted setups.
-- Upgrade path: per-person, single-use, expiring invites (Supabase's invite emails fit here), plus an admin role.
+- There is **no sign-up page or endpoint**. Public self-sign-up is also **off in Supabase** (`[auth] enable_signup = false`), so nobody can create an identity by calling Supabase directly. Only the backend can, through the admin API. (The email provider itself stays on: `[auth.email] enable_signup = false` would disable password sign-in too.)
+- The **first** attorney is created with `python -m app.cli create-user`, which needs shell access to the deployment. That is the trust anchor.
+- After that, a signed-in attorney invites a colleague by name and email. The backend creates a Supabase user **without a password** plus the `users` row, and queues an invite email (§6). The link is per-person, single-use and expires after 24 hours (`otp_expiry`, the maximum Supabase allows, so invitees have a working day to act; reset links share the setting). Inviting someone whose invite is still pending sends a fresh link, which also invalidates the old one; inviting someone who has accepted is a `409`.
+- **Accepting** (`/accept-invite?token=…`): the page shows a password form; only submitting it redeems the token (`/auth/v1/verify`), sets the password through the admin API and returns a session. The page load alone doesn't touch the token, so email link scanners that prefetch URLs can't burn it. The password length is checked *before* redeeming, since a redeemed token can't be reused.
+- **Password reset** (`/forgot-password` → `/reset-password?token=…`): the request endpoint always answers `202` with the same message and only queues an email if the address belongs to an active attorney, so it can't be used to discover accounts. It's rate-limited per IP, and at most one reset email per account per minute is queued, so nobody can flood an attorney's inbox from many IPs. Confirming sets the new password and **signs out the account's other sessions**, in case the reset was prompted by someone else using it.
+- Both token pages send `Referrer-Policy: no-referrer` and `noindex`, so the token in the URL isn't leaked to other sites or search engines.
+- Login, accepting, and both reset endpoints are rate-limited per IP.
+- Upgrade path: an admin role (today any attorney can invite), listing and revoking pending invites, and MFA.
 
 **Keeping Supabase's Data API away from lead data.** Supabase exposes tables in `public` over REST/GraphQL to anyone with the publishable key, subject to row level security. Migration `0002` enables RLS on every table with no policies and revokes the `anon`/`authenticated` grants, and `config.toml` sets `auto_expose_new_tables = false`. The backend connects as the table owner, which RLS doesn't restrict. The resumes bucket is private, and only the backend's secret key can read it.
 
 **Sessions in the browser.**
 
-- The browser never holds a token in JavaScript. Login and sign-up server actions store the access and refresh tokens in **httpOnly, SameSite=Lax cookies** (Secure over HTTPS).
+- The browser never holds a token in JavaScript. The login, accept-invite and reset-password server actions store the access and refresh tokens in **httpOnly, SameSite=Lax cookies** (Secure over HTTPS).
 - Next.js `proxy.ts` runs before every internal page, server action and resume download. If the access token is missing or within a minute of expiring, it exchanges the refresh token through the API and hands the new cookies to both the current request and the browser. If that fails, it clears the cookies and redirects to `/login`.
 - Signing out revokes the Supabase session and clears the cookies.
 - The proxy is session plumbing; the API's token check is the security boundary.
@@ -220,7 +229,7 @@ The form is public, so it's the main abuse surface.
 - **File validation:** extension allow-list plus magic-byte sniffing (a renamed `.exe` is rejected). The client's `Content-Type` is ignored; the stored type comes from our own allow-list.
 - **Size limits while streaming:** an ASGI middleware counts request-body bytes as they arrive and aborts with `413` once past the limit, so an oversized upload is cut off rather than buffered. The exact 10 MB per-file limit is then checked on the parsed file. The Next.js route handler applies the same cap in front.
 - **Stored under a generated key** (`leads/{lead_id}/{uuid}.{ext}`), never the user's filename, which is kept only as metadata and sanitized on download (`Content-Disposition`).
-- **Rate limiting** per client IP on `POST /leads` and `POST /auth/login` (slowapi). The web tier forwards the visitor's IP in `X-Forwarded-For`, and uvicorn only trusts that header from addresses in `FORWARDED_ALLOW_IPS`. Limits are held in memory, which is correct for one API instance; with several replicas they'd move to Redis.
+- **Rate limiting** per client IP on `POST /leads`, login, accepting invites and both password-reset endpoints (slowapi). The web tier forwards the visitor's IP in `X-Forwarded-For`, and uvicorn only trusts that header from addresses in `FORWARDED_ALLOW_IPS`. Limits are held in memory, which is correct for one API instance; with several replicas they'd move to Redis.
 - **Honeypot field** in the form to drop naive bots without adding a CAPTCHA.
 - **CORS** limited to the web origin.
 - Input validation via Pydantic (email format, trimmed names, length limits).
@@ -234,7 +243,10 @@ Next.js App Router, TypeScript, Tailwind.
 | `/` | Public | Redirects to `/apply`. |
 | `/apply` | Public | Lead form with client + server validation, file picker, success state. Submits to the `/api/leads` route handler, which forwards to the API. |
 | `/login` | Public | Attorney login. |
-| `/signup` | Public | Create an attorney account: first account freely, later ones with the invite code. |
+| `/forgot-password` | Public | Request a password-reset email. |
+| `/reset-password` | Public (token link) | Choose a new password, then land signed in. |
+| `/accept-invite` | Public (token link) | Choose a password to finish an invite, then land signed in. |
+| `/invite` | Attorney | Invite a colleague by name and email. |
 | `/leads` | Attorney | Cards on phones, a table from tablet width: name, email, submitted, state. Filter by state, paginated. |
 | `/leads/[id]` | Attorney | All fields, resume download, "Mark as reached out" button. |
 
@@ -291,7 +303,7 @@ Layering in the API is `routes → services → repositories/adapters`. Routes h
 
 ## 11. Testing and quality
 
-- **Backend:** pytest against a real Postgres (a service container in CI). Supabase Auth is replaced by an in-memory fake that issues real signed tokens, so the verification path is exercised; the Supabase Auth and Storage HTTP clients are tested against mocked responses, and ES256/JWKS verification with a generated key. Also covers lead creation (valid, bad file, too large), sign-up rules, list/filter, state transitions (including the rejected ones), and the worker's retry logic.
+- **Backend:** pytest against a real Postgres (a service container in CI). Supabase Auth is replaced by an in-memory fake that issues real signed tokens, so the verification path is exercised; the Supabase Auth and Storage HTTP clients are tested against mocked responses, and ES256/JWKS verification with a generated key. Also covers lead creation (valid, bad file, too large), the invite and password-reset flows end to end (queue → worker → link → set password), list/filter, state transitions (including the rejected ones), and the worker's retry logic.
 - **Frontend:** ESLint, unit tests (Vitest) for form validation and token-expiry handling, and a production build, which type-checks the app.
 - **CI:** GitHub Actions runs ruff, mypy, pytest, `tsc`, ESLint, and the Next.js build on every push and PR.
 

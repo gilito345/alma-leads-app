@@ -80,26 +80,39 @@ export async function logout(accessToken: string): Promise<void> {
   }
 }
 
-export interface SignupStatus {
-  open: boolean;
-  invite_code_required: boolean;
-  enabled: boolean;
-}
-
-export function getSignupStatus() {
-  return request<SignupStatus>("/api/v1/auth/signup");
-}
-
-export function signup(body: {
+export interface InviteResult {
   email: string;
   full_name: string;
-  password: string;
-  invite_code?: string;
-}) {
-  return request<SessionTokens>("/api/v1/auth/signup", {
+  resent: boolean;
+}
+
+/** Invite an attorney by email (a signed-in attorney only). */
+export function inviteAttorney(body: { email: string; full_name: string }) {
+  return authed<InviteResult>("/api/v1/auth/invites", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+  });
+}
+
+/** Ask for a reset link. Answers the same whether or not the account exists. */
+export function requestPasswordReset(email: string) {
+  return request<{ message: string }>("/api/v1/auth/password-reset", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+}
+
+export type PasswordLinkFlow = "invite" | "reset";
+
+/** Redeem an emailed invite or reset link by choosing a password; returns a session. */
+export function setPasswordFromLink(flow: PasswordLinkFlow, token: string, password: string) {
+  const path = flow === "invite" ? "/api/v1/auth/invites/accept" : "/api/v1/auth/password-reset/confirm";
+  return request<SessionTokens>(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token, password }),
   });
 }
 

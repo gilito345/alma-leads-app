@@ -7,9 +7,11 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.db.session import get_sessionmaker
-from app.models import EmailKind, EmailOutbox, EmailStatus
+from app.models import EmailKind, EmailOutbox, EmailStatus, User
 from app.services.email import ConsoleEmailSender, EmailMessage, EmailSendError
+from app.services.supabase_auth import SupabaseAuthError
 from app.worker.outbox import OutboxProcessor, backoff_delay
+from tests.fakes import FakeSupabaseAuth
 from tests.helpers import lead_form, resume_file
 
 
@@ -152,3 +154,71 @@ def test_backoff_grows_and_is_capped() -> None:
     assert backoff_delay(2) == timedelta(seconds=60)
     assert backoff_delay(3) == timedelta(seconds=120)
     assert backoff_delay(50) == timedelta(hours=1)
+
+
+class TestAccountEmails:
+    @pytest.fixture
+    def invitee(self, db: Session, supabase_auth: FakeSupabaseAuth) -> User:
+        user_id = supabase_auth.admin_create_user("new@firm.test", None, "New Attorney")
+        user = User(id=user_id, email="new@firm.test", full_name="New Attorney")
+        db.add(user)
+        db.flush()
+        db.add(EmailOutbox(user_id=user.id, kind=EmailKind.ATTORNEY_INVITE, recipient=user.email))
+        db.commit()
+        return user
+
+    def test_invite_link_is_minted_at_send_time(
+        self, invitee: User, db: Session, settings: Settings, supabase_auth: FakeSupabaseAuth
+    ) -> None:
+        assert supabase_auth.links == {}  # nothing usable exists until the worker sends
+        sender = ConsoleEmailSender()
+        processor = OutboxProcessor(
+            get_sessionmaker(), sender, settings, supabase_auth=supabase_auth, clock=Clock()
+        )
+
+        assert processor.process_batch() == 1
+
+        (row,) = outbox_rows(db)
+        assert row.status == EmailStatus.SENT
+        (message,) = sender.sent
+        assert supabase_auth.token_for("new@firm.test") in message.text
+
+    def test_invite_already_accepted_fails_without_retrying(
+        self, invitee: User, db: Session, settings: Settings, supabase_auth: FakeSupabaseAuth
+    ) -> None:
+        supabase_auth.confirmed.add(invitee.id)
+        processor = OutboxProcessor(
+            get_sessionmaker(),
+            ConsoleEmailSender(),
+            settings,
+            supabase_auth=supabase_auth,
+            clock=Clock(),
+        )
+
+        processor.process_batch()
+
+        (row,) = outbox_rows(db)
+        assert row.status == EmailStatus.FAILED
+        assert row.attempts == 1
+        assert "already accepted" in (row.last_error or "")
+
+    def test_supabase_outage_is_retried(
+        self, invitee: User, db: Session, settings: Settings, supabase_auth: FakeSupabaseAuth
+    ) -> None:
+        def unavailable(*_: object) -> str:
+            raise SupabaseAuthError("Could not reach Supabase Auth")
+
+        supabase_auth.admin_generate_link = unavailable  # type: ignore[method-assign]
+        processor = OutboxProcessor(
+            get_sessionmaker(),
+            ConsoleEmailSender(),
+            settings,
+            supabase_auth=supabase_auth,
+            clock=Clock(),
+        )
+
+        processor.process_batch()
+
+        (row,) = outbox_rows(db)
+        assert row.status == EmailStatus.PENDING
+        assert row.attempts == 1

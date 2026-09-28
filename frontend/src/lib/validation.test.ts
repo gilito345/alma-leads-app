@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { formatBytes, MAX_RESUME_BYTES, validateLeadForm, type LeadFormInput } from "./validation";
+import {
+  formatBytes,
+  MAX_RESUME_BYTES,
+  validateLeadForm,
+  validateNewPassword,
+  type LeadFormInput,
+} from "./validation";
 
 const valid: LeadFormInput = {
   first_name: "Ada",
@@ -46,5 +52,21 @@ describe("formatBytes", () => {
     expect(formatBytes(512)).toBe("512 B");
     expect(formatBytes(2048)).toBe("2 KB");
     expect(formatBytes(3 * 1024 * 1024)).toBe("3.0 MB");
+  });
+});
+
+describe("validateNewPassword", () => {
+  it("accepts a long enough, matching password", () => {
+    expect(validateNewPassword("twelve-chars", "twelve-chars")).toEqual({});
+  });
+
+  it("requires at least 12 characters", () => {
+    expect(validateNewPassword("short", "short").password).toBeDefined();
+  });
+
+  it("requires the confirmation to match", () => {
+    expect(validateNewPassword("twelve-chars", "twelve-charz")).toEqual({
+      confirm_password: "Passwords don't match.",
+    });
   });
 });

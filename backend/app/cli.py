@@ -2,8 +2,9 @@
 
     python -m app.cli create-user --email jane@firm.com --name "Jane Doe"
 
-Creates the Supabase Auth identity and the matching attorney record. The password is prompted
-for (or read from --password / the CREATE_USER_PASSWORD env var for scripted setups).
+Creates the Supabase Auth identity and the matching attorney record. This is how the first
+attorney is made; after that, attorneys invite colleagues from the dashboard. The password is
+prompted for (or read from --password / the CREATE_USER_PASSWORD env var for scripted setups).
 """
 
 import argparse

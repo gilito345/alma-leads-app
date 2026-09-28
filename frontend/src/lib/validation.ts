@@ -46,6 +46,22 @@ export function validateLeadForm(input: LeadFormInput): FieldErrors {
   return errors;
 }
 
+export const MIN_PASSWORD_LENGTH = 12;
+
+export type PasswordField = "password" | "confirm_password";
+
+/** Checks for choosing a new password (accepting an invite or resetting). */
+export function validateNewPassword(
+  password: string,
+  confirm: string,
+): Partial<Record<PasswordField, string>> {
+  if (password.length < MIN_PASSWORD_LENGTH) {
+    return { password: `Use at least ${MIN_PASSWORD_LENGTH} characters.` };
+  }
+  if (password !== confirm) return { confirm_password: "Passwords don't match." };
+  return {};
+}
+
 function isAcceptedExtension(ext: string): boolean {
   return (ACCEPTED_RESUME_EXTENSIONS as readonly string[]).includes(ext);
 }
