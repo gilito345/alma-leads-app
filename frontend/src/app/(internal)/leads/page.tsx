@@ -31,13 +31,13 @@ export default async function LeadsPage({
     <div>
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="font-serif text-2xl sm:text-3xl">Leads</h1>
+          <h1 className="font-medium tracking-heading text-2xl sm:text-3xl">Leads</h1>
           <p className="mt-1 text-sm text-muted">
             {data.total} {data.total === 1 ? "lead" : "leads"}
             {state ? ` · ${FILTERS.find((f) => f.state === state)?.label.toLowerCase()}` : ""}
           </p>
         </div>
-        <nav aria-label="Filter by state" className="flex w-full rounded-lg border border-line bg-surface p-1 text-sm sm:w-auto">
+        <nav aria-label="Filter by state" className="flex w-full rounded-lg bg-panel p-1 text-sm sm:w-auto">
           {FILTERS.map((filter) => {
             const active = filter.state === state;
             return (
@@ -46,7 +46,7 @@ export default async function LeadsPage({
                 href={filter.state ? `/leads?state=${filter.state}` : "/leads"}
                 aria-current={active ? "page" : undefined}
                 className={`flex-1 rounded-md px-3 py-1.5 text-center whitespace-nowrap transition sm:flex-none ${
-                  active ? "bg-ink text-white" : "text-ink-soft hover:bg-paper"
+                  active ? "bg-surface font-medium text-ink shadow-row" : "text-ink-soft hover:text-ink"
                 }`}
               >
                 {filter.label}
@@ -56,7 +56,7 @@ export default async function LeadsPage({
         </nav>
       </div>
 
-      <div className="mt-6 overflow-hidden rounded-xl border border-line bg-surface">
+      <div className="mt-6 overflow-hidden rounded-2xl bg-surface shadow-card">
         {data.items.length === 0 ? (
           <p className="px-4 py-12 text-center text-muted sm:px-6 sm:py-16">
             {state ? "No leads in this state." : "No leads yet. They'll appear here as prospects submit the form."}
@@ -67,7 +67,7 @@ export default async function LeadsPage({
           <ul className="divide-y divide-line md:hidden">
             {data.items.map((lead) => (
               <li key={lead.id}>
-                <Link href={`/leads/${lead.id}`} className="block px-4 py-4 active:bg-paper/60">
+                <Link href={`/leads/${lead.id}`} className="block px-4 py-4 active:bg-apple-soft">
                   <div className="flex items-start justify-between gap-3">
                     <span className="min-w-0 font-medium break-words text-ink">
                       {lead.first_name} {lead.last_name}
@@ -86,17 +86,17 @@ export default async function LeadsPage({
           {/* Tablets and up: a table. */}
           <div className="hidden overflow-x-auto md:block">
             <table className="w-full text-left text-sm">
-              <thead className="border-b border-line bg-paper/60 text-xs tracking-wide text-muted uppercase">
+              <thead className="border-b border-line text-[11px] font-bold tracking-[0.08em] text-muted uppercase">
                 <tr>
-                  <th scope="col" className="px-6 py-3 font-medium">Name</th>
-                  <th scope="col" className="px-6 py-3 font-medium">Email</th>
-                  <th scope="col" className="px-6 py-3 font-medium">Submitted</th>
-                  <th scope="col" className="px-6 py-3 font-medium">State</th>
+                  <th scope="col" className="px-6 py-3.5">Name</th>
+                  <th scope="col" className="px-6 py-3.5">Email</th>
+                  <th scope="col" className="px-6 py-3.5">Submitted</th>
+                  <th scope="col" className="px-6 py-3.5">State</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line">
                 {data.items.map((lead) => (
-                  <tr key={lead.id} className="group hover:bg-paper/60">
+                  <tr key={lead.id} className="group transition hover:bg-apple-soft">
                     <td className="max-w-[16rem] px-6 py-4 font-medium break-words">
                       <Link href={`/leads/${lead.id}`} className="text-ink group-hover:text-accent">
                         {lead.first_name} {lead.last_name}
@@ -149,7 +149,7 @@ function PageLink(props: {
   const query = new URLSearchParams({ page: String(props.page) });
   if (props.state) query.set("state", props.state);
   return (
-    <Link href={`/leads?${query}`} className="rounded-md px-3 py-1.5 text-accent hover:bg-accent/5">
+    <Link href={`/leads?${query}`} className="rounded-md px-3 py-1.5 text-accent hover:bg-apple-soft">
       {props.children}
     </Link>
   );

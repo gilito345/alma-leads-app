@@ -29,7 +29,7 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
 
       <div className="mt-4 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="font-serif text-2xl break-words sm:text-3xl">
+          <h1 className="font-medium tracking-heading text-2xl break-words sm:text-3xl">
             {lead.first_name} {lead.last_name}
           </h1>
           <p className="mt-1 text-sm text-muted">
@@ -39,7 +39,7 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
         <StateBadge state={lead.state} />
       </div>
 
-      <dl className="mt-6 divide-y divide-line rounded-xl border border-line bg-surface sm:mt-8">
+      <dl className="mt-6 divide-y divide-line rounded-2xl bg-surface shadow-card sm:mt-8">
         <Row label="First name">{lead.first_name}</Row>
         <Row label="Last name">{lead.last_name}</Row>
         <Row label="Email">
@@ -68,7 +68,7 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
       </dl>
 
       {lead.state === "PENDING" && (
-        <div className="mt-6 flex flex-col gap-4 rounded-xl border border-line bg-surface px-4 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+        <div className="mt-6 flex flex-col gap-4 rounded-2xl bg-apple px-4 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <p className="text-sm text-ink-soft">
             Contacted this prospect? Mark the lead so the team knows it&apos;s handled.
           </p>
@@ -82,7 +82,7 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="grid gap-1 px-4 py-3.5 sm:grid-cols-[10rem_1fr] sm:gap-4 sm:px-6 sm:py-4">
-      <dt className="text-sm text-muted">{label}</dt>
+      <dt className="text-[11px] font-bold tracking-[0.08em] text-muted uppercase sm:pt-0.5">{label}</dt>
       <dd className="min-w-0 text-sm break-words text-ink">{children}</dd>
     </div>
   );

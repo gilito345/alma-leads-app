@@ -15,7 +15,7 @@ export function InviteForm() {
     // Re-mount after each successful invite so the inputs reset.
     <form key={state.invited?.email ?? "new"} action={formAction} className="space-y-4" noValidate>
       {state.invited && (
-        <p role="status" className="rounded-lg border border-accent/30 bg-accent/5 px-3 py-2 text-sm text-ink-soft">
+        <p role="status" className="rounded-md bg-apple-soft px-3 py-2 text-sm text-ink-soft">
           {state.invited.resent ? "Sent a new invite to " : "Invite sent to "}
           <strong className="font-medium text-ink">{state.invited.full_name}</strong> ({state.invited.email}).
         </p>

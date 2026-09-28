@@ -62,7 +62,7 @@ export function LeadForm() {
   if (status === "success") {
     return (
       <div role="status" className="py-8 text-center">
-        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-success/10 text-success">
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-apple text-brand">
           <svg aria-hidden="true" viewBox="0 0 20 20" className="h-6 w-6" fill="currentColor">
             <path
               fillRule="evenodd"
@@ -71,7 +71,7 @@ export function LeadForm() {
             />
           </svg>
         </div>
-        <h2 className="mt-5 font-serif text-2xl">Thank you{submittedName ? `, ${submittedName}` : ""}.</h2>
+        <h2 className="mt-5 text-2xl font-medium tracking-heading">Thank you{submittedName ? `, ${submittedName}` : ""}.</h2>
         <p className="mt-3 text-ink-soft">
           We&apos;ve received your information. Check your inbox for a confirmation. An attorney
           will be in touch soon.
@@ -84,10 +84,13 @@ export function LeadForm() {
 
   return (
     <form onSubmit={handleSubmit} noValidate className="space-y-5">
-      <h2 className="font-serif text-2xl">Your details</h2>
+      <div>
+        <h2 className="text-xl font-medium tracking-heading sm:text-2xl">Just a few details, and we&apos;ll take it from here.</h2>
+        <p className="mt-2 text-sm text-muted">All fields are required.</p>
+      </div>
 
       {formError && (
-        <div role="alert" className="rounded-lg border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
+        <div role="alert" className="rounded-md border border-danger/20 bg-danger-soft px-4 py-3 text-sm text-danger">
           {formError}
         </div>
       )}
@@ -118,7 +121,7 @@ export function LeadForm() {
       <button
         type="submit"
         disabled={submitting}
-        className="w-full rounded-lg bg-accent px-5 py-3 font-medium text-white transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+        className="w-full rounded-xl bg-accent px-6 py-3.5 font-medium text-white transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
       >
         {submitting ? "Submitting…" : "Submit"}
       </button>
@@ -152,7 +155,7 @@ function TextField(props: {
         required
         aria-invalid={Boolean(props.error)}
         aria-describedby={props.error ? errorId : undefined}
-        className="mt-1.5 block w-full rounded-lg border border-line bg-white px-3.5 py-2.5 text-ink shadow-xs outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 aria-invalid:border-danger"
+        className="mt-1.5 block w-full rounded-md border border-line bg-surface px-3 py-3 text-ink outline-none transition focus:border-accent focus:ring-3 focus:ring-accent/20 aria-invalid:border-danger"
       />
       {props.error && (
         <p id={errorId} className="mt-1.5 text-sm text-danger">
@@ -176,24 +179,25 @@ function FileField(props: {
       <span className="block text-sm font-medium text-ink">Resume / CV</span>
       <label
         htmlFor={id}
-        className={`mt-1.5 flex cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed px-4 py-6 text-center transition hover:border-accent hover:bg-accent/5 ${
-          props.error ? "border-danger" : "border-line"
+        className={`mt-1.5 flex cursor-pointer items-center gap-3 rounded-md border bg-panel px-4 py-3.5 transition hover:bg-apple-soft ${
+          props.error ? "border-danger" : "border-transparent"
         }`}
       >
+        <UploadIcon />
         {props.file ? (
-          <>
-            <span className="font-medium break-all text-ink">{props.file.name}</span>
-            <span className="mt-1 text-sm text-muted">
+          <span className="min-w-0">
+            <span className="block font-medium break-all text-ink">{props.file.name}</span>
+            <span className="block text-sm text-muted">
               {formatBytes(props.file.size)} · Click to choose a different file
             </span>
-          </>
+          </span>
         ) : (
-          <>
-            <span className="font-medium text-accent">Choose a file</span>
-            <span id={hintId} className="mt-1 text-sm text-muted">
+          <span className="min-w-0">
+            <span className="block font-medium text-ink-soft">Upload resume or CV</span>
+            <span id={hintId} className="block text-sm text-muted">
               PDF, DOC or DOCX, up to 10 MB
             </span>
-          </>
+          </span>
         )}
       </label>
       <input
@@ -213,6 +217,14 @@ function FileField(props: {
         </p>
       )}
     </div>
+  );
+}
+
+function UploadIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" className="h-6 w-6 flex-none text-ink-soft" fill="currentColor">
+      <path d="M19.35 10.04A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96ZM14 13v4h-4v-4H7l5-5 5 5h-3Z" />
+    </svg>
   );
 }
 

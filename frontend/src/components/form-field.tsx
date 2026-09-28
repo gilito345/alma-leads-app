@@ -24,7 +24,7 @@ export function FormField(props: {
         required
         aria-invalid={Boolean(props.error)}
         aria-describedby={describedBy}
-        className="mt-1.5 block w-full rounded-lg border border-line bg-white px-3.5 py-2.5 outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 aria-invalid:border-danger"
+        className="mt-1.5 block w-full rounded-md border border-line bg-surface px-3 py-3 outline-none transition focus:border-accent focus:ring-3 focus:ring-accent/20 aria-invalid:border-danger"
       />
       {props.error ? (
         <p id={`${props.id}-error`} className="mt-1.5 text-sm text-danger">
