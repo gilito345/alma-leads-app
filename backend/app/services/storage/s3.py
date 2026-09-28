@@ -18,7 +18,10 @@ _CHUNK_SIZE = 64 * 1024
 
 
 class S3ObjectStorage:
-    """S3 or any S3-compatible service (R2, MinIO, ...). Used in production."""
+    """S3 or any S3-compatible service (R2, MinIO, ...), selected with STORAGE_BACKEND=s3.
+
+    An alternative to the default Supabase Storage for deployments that keep files in S3.
+    """
 
     def __init__(self, client: "S3Client", bucket: str, region: str) -> None:
         self._client = client

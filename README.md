@@ -4,8 +4,11 @@ A public lead-intake form and an internal, auth-guarded dashboard for attorneys.
 
 - Prospects submit their first name, last name, email and resume/CV.
 - On submission, the prospect gets a confirmation email and an attorney gets a notification.
-- Attorneys sign in to see every lead with its details, download resumes, and move a lead
-  from `PENDING` to `REACHED_OUT` once they've contacted the prospect.
+- Attorneys sign in to see every lead with its details, read the resume right in the page
+  (or download it), email the prospect in one click, and move a lead from `PENDING` to
+  `REACHED_OUT` once they've contacted them.
+- There's no public sign-up: attorneys invite colleagues by email, and forgotten passwords
+  are reset by email.
 
 | Layer | Tech |
 |---|---|
@@ -14,7 +17,7 @@ A public lead-intake form and an internal, auth-guarded dashboard for attorneys.
 | Email | Resend, sent by a background worker from a transactional outbox |
 | Web | Next.js 16 (App Router, TypeScript, Tailwind CSS 4) |
 
-The reasoning behind the architecture is in [`docs/DESIGN.md`](docs/DESIGN.md).
+The reasoning behind the architecture is in [`docs/DESIGN.md`](docs/DESIGN.md); the visual design (based on [tryalma.com](https://www.tryalma.com)) is in [`docs/STYLE_GUIDE.md`](docs/STYLE_GUIDE.md).
 
 ## Running locally
 
@@ -49,6 +52,8 @@ Edit `.env` and set:
 You'll fill in the two Supabase keys after the next step.
 
 > **Resend without a verified domain** can only deliver to the email address that owns the Resend account. To demo end to end, use that address both as `ATTORNEY_NOTIFICATION_EMAIL` and in the form. To email anyone, [verify a domain](https://resend.com/domains) and set `EMAIL_FROM` to an address on it.
+
+> **Changed `.env` after starting the app?** The containers read it only when they start, so run `docker compose up -d` to apply the change.
 
 **2. Start Supabase** (from the repo root)
 
@@ -89,7 +94,7 @@ Then sign in at http://localhost:3000/login. To add colleagues, use **Invite att
 | http://localhost:8000/docs | Interactive API docs (OpenAPI) |
 | http://localhost:54323 | Supabase Studio: browse tables, auth users and uploaded resumes |
 
-Submit the form with a PDF, DOC or DOCX, then watch `docker compose logs -f worker` to see both emails go out. Sign in to see the lead and mark it as reached out.
+Submit the form with a PDF, DOC or DOCX. Both emails go out within a few seconds: to your inbox with a `RESEND_API_KEY`, or printed in `docker compose logs -f worker` without one. Then sign in, open the lead to read the resume in the page, email the prospect from the **Email** button, and mark the lead as reached out.
 
 **Stopping:** `docker compose down`, then `supabase stop`. Data is kept between runs; `supabase stop --no-backup` discards it.
 
@@ -120,7 +125,7 @@ uv run python -m app.worker                                  # in another termin
 
 ```bash
 cd frontend
-npm install
+npm ci                                                        # installs the locked versions
 API_INTERNAL_URL=http://localhost:8000 npm run dev            # web on :3000
 ```
 
@@ -146,7 +151,7 @@ CI runs all of these on every push and pull request (`.github/workflows/ci.yml`)
 backend/     FastAPI app (app/), Alembic migrations, tests
 frontend/    Next.js app (src/app routes, src/components, src/lib)
 supabase/    Supabase CLI config for the local stack (config.toml)
-docs/        Design document
+docs/        Design document (DESIGN.md) and style guide (STYLE_GUIDE.md)
 docker-compose.yml, .env.example
 ```
 

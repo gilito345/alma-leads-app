@@ -23,7 +23,7 @@ class SupabaseObjectStorage:
     """Supabase Storage via its REST API, authenticated with the project's secret key.
 
     The bucket is private: only this backend (holding the secret key) can read or write it,
-    and attorneys download resumes through the authenticated API.
+    and attorneys view or download resumes through the authenticated API.
     """
 
     def __init__(

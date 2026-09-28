@@ -6,7 +6,7 @@ Prospects fill in a **public** form (first name, last name, email, resume/CV). O
 
 1. Persists the lead and its resume.
 2. Emails the prospect (confirmation) and an attorney (new-lead notification).
-3. Exposes an **auth-guarded internal UI** where attorneys list leads, view details, download resumes, and move a lead from `PENDING` to `REACHED_OUT`.
+3. Exposes an **auth-guarded internal UI** where attorneys list leads, view details, read or download resumes, contact the prospect, and move a lead from `PENDING` to `REACHED_OUT`.
 
 Constraints from the brief: FastAPI for the API, Next.js for the web app, persistent storage, a real email service, production-style repo structure. Platform choice: **Supabase** provides the database, authentication and file storage; **Resend** sends email.
 
@@ -36,10 +36,11 @@ flowchart LR
         STORE[(Storage<br/>private bucket)]
     end
     API -->|SQL| DB
-    API -->|sign-in, refresh,<br/>admin create user| AUTH
+    API -->|sign-in, refresh, redeem links,<br/>admin: create users, set passwords| AUTH
     API -.->|verify tokens via JWKS| AUTH
     API -->|resumes| STORE
     WORKER[Email worker] -->|poll outbox| DB
+    WORKER -->|mint invite /<br/>reset links| AUTH
     WORKER -->|HTTPS| RESEND[Resend]
 ```
 
@@ -47,7 +48,7 @@ flowchart LR
 |---|---|
 | `web` (Docker) | Next.js (App Router). Public form + internal dashboard. Acts as a backend-for-frontend: the browser only talks to this origin; the Next.js server holds the session cookies and calls the API. |
 | `api` (Docker) | FastAPI. All business logic, validation and authorization; the only thing that talks to Supabase. |
-| `worker` (Docker) | Same Python codebase, different entrypoint. Sends queued emails with retries. |
+| `worker` (Docker) | Same Python codebase, different entrypoint. Sends queued emails with retries; for invites and password resets it also asks Supabase Auth for the one-time link. |
 | Supabase Postgres | Leads, attorney records, email outbox. Schema owned by Alembic migrations. |
 | Supabase Auth | Attorney identities, passwords and sessions (access + refresh tokens). |
 | Supabase Storage | Resume files, in the private `resumes` bucket. |
@@ -109,7 +110,7 @@ erDiagram
     }
 ```
 
-Indexes: `leads(state, created_at desc)` for the dashboard's default view, `leads(email)` for lookup, `email_outbox(status, next_attempt_at)` for the worker's poll.
+Indexes: `leads(state, created_at desc)` for the dashboard's default view, `leads(email)` for lookup, `email_outbox(status, next_attempt_at)` for the worker's poll, and `email_outbox(lead_id)` / `email_outbox(user_id)` for the foreign keys (the latter also backs the one-reset-email-per-minute check).
 
 `users` holds only attorneys: Supabase Auth owns the identity and password, and a row here is what grants dashboard access. An invited attorney has a row from the moment they're invited, but no password (and so no way to sign in) until they accept. Each `email_outbox` row belongs to exactly one lead or one attorney (a check constraint enforces it). Resume files live in Supabase Storage; `resume_object_key` points at them.
 
@@ -185,7 +186,7 @@ This uses Postgres as the queue, so there's no Redis/RabbitMQ to operate. At muc
 - `ResendEmailSender` — real delivery, used when `RESEND_API_KEY` is set.
 - `ConsoleEmailSender` — logs the rendered email; used in tests and when no key is configured, so the project still runs without an account.
 
-Email bodies are Jinja2 templates (HTML + plain-text) in the API codebase.
+Email bodies are Jinja2 templates (HTML + plain-text) in the API codebase (`app/templates/email/`). The HTML versions share one layout and a few building blocks, styled like the web app; the rules for what mail clients can render are in [STYLE_GUIDE.md §7](STYLE_GUIDE.md#7-email). User input is auto-escaped.
 
 **Account emails use the same outbox.** Attorney invites and password resets are queued the same way (`user_id` instead of `lead_id`), so they get the same retries, idempotency, templates and provider as lead emails, and Supabase never has to send mail itself (no second SMTP setup, and none of Supabase's built-in email rate limits). The row stores no secret: the worker asks Supabase for a fresh single-use link (`/admin/generate_link`) at the moment it sends. So a database dump or backup never contains a usable invite or reset link. A retry mints a new link, which replaces the previous one.
 
@@ -237,7 +238,7 @@ The form is public, so it's the main abuse surface.
 
 ## 9. Web app
 
-Next.js App Router, TypeScript, Tailwind.
+Next.js App Router, TypeScript, Tailwind. The look follows [STYLE_GUIDE.md](STYLE_GUIDE.md), based on tryalma.com: design tokens live in `globals.css`, and the Figtree font is self-hosted through `next/font`.
 
 | Route | Access | Content |
 |---|---|---|
@@ -248,10 +249,10 @@ Next.js App Router, TypeScript, Tailwind.
 | `/reset-password` | Public (token link) | Choose a new password, then land signed in. |
 | `/accept-invite` | Public (token link) | Choose a password to finish an invite, then land signed in. |
 | `/invite` | Attorney | Invite a colleague by name and email. |
-| `/leads` | Attorney | Cards on phones, a table from tablet width: name, email, submitted, state. Filter by state, paginated. |
+| `/leads` | Attorney | Cards on phones, a table from tablet width: name, email, submitted, state. Clicking anywhere on a row opens the lead (the name stays the row's single link for keyboard and screen-reader users). Filter by state, paginated. |
 | `/leads/[id]` | Attorney | Contact bar ("Email {name}" with a prefilled subject, "Copy email", "Mark as reached out"), all fields, and the resume shown in the page with a download button. |
 
-Pages are server components that call the API directly, and mutations (login, logout, mark as reached out) are **server actions**, so the internal UI needs no client-side data-fetching library and never exposes the API token to browser JavaScript. Resume downloads go through the `/api/leads/[id]/resume` route handler, which streams the file from the API.
+Pages are server components that call the API directly, and mutations (login, logout, mark as reached out, invite, accept invite, request and confirm password reset) are **server actions**, so the internal UI needs no client-side data-fetching library and never exposes the API token to browser JavaScript. Resume downloads go through the `/api/leads/[id]/resume` route handler, which streams the file from the API.
 
 **Viewing resumes in the page.** Uploaded files come from strangers, so the preview is deliberately narrow:
 
@@ -266,27 +267,32 @@ Timestamps are rendered in the viewer's own time zone by a small client componen
 ```
 alma-leads-app/
 ├── README.md                 # how to run locally
-├── docs/DESIGN.md            # this document
+├── docs/
+│   ├── DESIGN.md             # this document
+│   └── STYLE_GUIDE.md        # visual design: tokens, type, components, email
 ├── docker-compose.yml        # api, worker, web (Supabase runs via its CLI)
 ├── supabase/config.toml      # local Supabase stack: auth settings, resumes bucket
 ├── .env.example
 ├── .github/workflows/ci.yml  # lint, type-check, test (backend + frontend)
 ├── backend/
 │   ├── pyproject.toml        # deps + ruff/mypy/pytest config (uv)
+│   ├── uv.lock               # pinned dependency versions
 │   ├── Dockerfile
 │   ├── alembic.ini
 │   ├── alembic/versions/
 │   ├── app/
 │   │   ├── main.py           # app factory, middleware, routers
-│   │   ├── cli.py            # create-user
+│   │   ├── cli.py            # create-user (the first attorney)
 │   │   ├── core/             # config (pydantic-settings), security, logging, errors
 │   │   ├── db/               # engine, session, base
 │   │   ├── models/           # SQLAlchemy models
 │   │   ├── schemas/          # Pydantic request/response models
 │   │   ├── repositories/     # DB queries, no business rules
-│   │   ├── services/         # lead service, auth service, Supabase Auth client
-│   │   │   ├── email/        # EmailSender interface, Resend + console, templates
+│   │   ├── services/         # leads, auth (invites, resets), Supabase Auth client,
+│   │   │   │                 #   resume validation and preview (DOCX → sanitized HTML)
+│   │   │   ├── email/        # EmailSender interface, Resend + console, rendering
 │   │   │   └── storage/      # ObjectStorage: Supabase Storage, S3, local files
+│   │   ├── templates/email/  # shared layout + one HTML and text template per email
 │   │   ├── api/
 │   │   │   ├── deps.py       # current_user, db session, services
 │   │   │   └── v1/           # auth.py, leads.py, health.py
@@ -294,15 +300,18 @@ alma-leads-app/
 │   └── tests/                # unit + API tests (pytest, httpx)
 └── frontend/
     ├── package.json
+    ├── package-lock.json     # pinned dependency versions
     ├── Dockerfile
     └── src/
         ├── proxy.ts          # refreshes sessions; redirects signed-out visitors to /login
         ├── app/
+        │   ├── globals.css   # design tokens (see STYLE_GUIDE.md)
         │   ├── apply/        # public form
         │   ├── login/        # sign-in page + server actions
-        │   ├── (internal)/   # auth-guarded layout, leads list and detail
-        │   └── api/          # route handlers: form submit, resume download, logout
-        ├── components/
+        │   ├── (account)/    # forgot/reset password, accept invite + server actions
+        │   ├── (internal)/   # auth-guarded layout, leads list and detail, invite
+        │   └── api/          # route handlers: form submit, resume stream, logout
+        ├── components/       # forms, resume viewer, badges, shared page parts
         └── lib/              # API client, session helpers, validation, types
 ```
 
@@ -310,9 +319,9 @@ Layering in the API is `routes → services → repositories/adapters`. Routes h
 
 ## 11. Testing and quality
 
-- **Backend:** pytest against a real Postgres (a service container in CI). Supabase Auth is replaced by an in-memory fake that issues real signed tokens, so the verification path is exercised; the Supabase Auth and Storage HTTP clients are tested against mocked responses, and ES256/JWKS verification with a generated key. Also covers lead creation (valid, bad file, too large), the invite and password-reset flows end to end (queue → worker → link → set password), list/filter, state transitions (including the rejected ones), and the worker's retry logic.
-- **Frontend:** ESLint, unit tests (Vitest) for form validation and token-expiry handling, and a production build, which type-checks the app.
-- **CI:** GitHub Actions runs ruff, mypy, pytest, `tsc`, ESLint, and the Next.js build on every push and PR.
+- **Backend:** pytest against a real Postgres (a service container in CI). Supabase Auth is replaced by an in-memory fake that issues real signed tokens, so the verification path is exercised; the Supabase Auth and Storage HTTP clients are tested against mocked responses, and ES256/JWKS verification with a generated key. Also covers lead creation (valid, bad file, too large), the invite and password-reset flows end to end (queue → worker → link → set password), resume previews (DOCX conversion, script and `javascript:` link stripping, zip bombs, corrupt files, PDF-only inline serving), list/filter, state transitions (including the rejected ones), and the worker's retry logic. Emails are checked for escaping of user input.
+- **Frontend:** ESLint, unit tests (Vitest) for form and password validation and token-expiry handling, and a production build, which type-checks the app.
+- **CI:** GitHub Actions runs ruff, mypy and pytest for the backend, and ESLint, Vitest and the Next.js build (which runs the TypeScript check) for the frontend, on every push and PR. Both sides install from lock files (`uv.lock`, `package-lock.json`), so CI and local runs use the same versions.
 
 ## 12. Configuration
 
@@ -326,4 +335,6 @@ All config comes from environment variables (12-factor), validated at startup by
 - Search across leads, CSV export.
 - SSO for staff (Supabase Auth supports it), audit log.
 - Observability: structured logs are in; metrics/tracing (OpenTelemetry) would be next.
-- Deployment config (e.g. container platform for web/api/worker + a hosted Supabase project).
+- Deployment config (e.g. container platform for web/api/worker + a hosted Supabase project), with a verified Resend sending domain so confirmations reach every prospect.
+- Previews for legacy `.doc` resumes (a LibreOffice conversion service), and a periodic sweep of orphaned resume objects.
+- MFA for attorneys (Supabase Auth's TOTP factors, enforced by requiring `aal2` tokens in the API), and an admin role for inviting.

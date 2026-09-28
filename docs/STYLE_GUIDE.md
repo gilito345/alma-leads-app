@@ -81,9 +81,9 @@ Headings use `font-medium tracking-heading` (−0.03em); a second line or key ph
 
 | Variant | Style | Use |
 |---|---|---|
-| Primary | `bg-accent text-white`, 12px radius, 14×24px padding, 16px/500, hover `accent-hover` | The one main action on a page (Submit, Sign in) |
-| Compact | `bg-moss text-white`, 6px radius, 8×14px padding, 14px/500 | In-row or secondary actions (Mark as reached out) |
-| Outline | transparent, `1px moss` border, `text-moss`, 6px radius | Low-emphasis actions (Sign out) |
+| Primary | `bg-accent text-white`, 12px radius, 14×24px padding, 16px/500, hover `accent-hover` | The one main action on a page (Submit, Sign in, Send invite). In the contact bar it's compact-sized (6px radius, 14px text) with a mail icon: "Email {first name}" |
+| Compact | `bg-moss text-white`, 6px radius, 10×16px padding, 14px/500 | Secondary actions (Mark as reached out) |
+| Outline | transparent, `1px moss` border, `text-moss`, 6px radius; hover fills `moss` with white text | Low-emphasis actions (Sign out, Copy email, Download, Open in new tab) |
 | Link | `text-accent`, underline on hover | Inline navigation |
 
 **Form fields:** white, 1px `line` border, 6px radius, 12px padding, 15–16px text, `muted` placeholder. Focus: `accent` border plus a 3px `accent/20` ring. Errors: `danger` border and a message below. Labels are 14px/500 above the field.
@@ -100,11 +100,17 @@ Headings use `font-medium tracking-heading` (−0.03em); a second line or key ph
 
 **Segmented control (filters):** `panel` track with 4px padding; the active segment is `surface` with `shadow-row` and `ink` text; inactive segments are `ink-soft`.
 
-**Table:** in a card; header row has no fill, just `line` below and table-header text; rows divided by `line`, hover `apple-soft`; name in `ink` 500, other cells `ink-soft`.
+**Table:** in a card; header row has no fill, just `line` below and table-header text; rows divided by `line`, hover `apple-soft`; name in `ink` 500, other cells `ink-soft`. If a row leads somewhere, the whole row is clickable, with the name as its one focusable link.
+
+**Details list:** a card of label/value rows divided by `line`; labels in table-header style (11px, 700, uppercase, `muted`), values 14px `ink`.
+
+**Contact bar:** an `apple` panel, 16px radius, at the top of a lead's page: the primary "Email {first name}" and outline "Copy email" on the left, "Mark as reached out" (or "Already contacted.") on the right; stacks on phones.
+
+**Resume viewer:** a card with a header row (table-header "Resume" label, filename and size, outline "Open in new tab" and "Download") above the document: the browser's PDF viewer, or converted Word text in a white frame set in a system sans at 15px. On phones a PDF becomes an "Open the resume" link.
 
 **Checklist item:** 20px rounded-square `accent` tile with a white check, then the text.
 
-**Header (dashboard):** `paper` background, `line` bottom border; wordmark in `brand`, 500, tight tracking; nav actions in `moss`.
+**Header (dashboard):** `paper` background, `line` bottom border; "Leads" wordmark in `brand`, 20px/600, tight tracking; "Invite attorney" as a `moss` text link, the attorney's name in `muted`, and an outline "Sign out".
 
 ## 6. Accessibility
 
